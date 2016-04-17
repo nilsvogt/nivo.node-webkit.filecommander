@@ -1,0 +1,376 @@
+<!--
+	NOTE:
+	directory[n] = some/path/that/also/could/be/a/symlink
+	cache[some/path/that/also/could/be/a/symlink].custom_path contains the resolved symlinkpath
+	
+	Todo:
+	- flexbox
+	- searchable cache
+
+	Done:
+	- sorted resultList
+-->
+<!DOCTYPE html>
+<html ng-app="app">
+	<head>
+		<title>Sheldon</title>
+		<style type="text/css">
+			/* reset */
+			* { margin: 0; padding: 0; }
+			*, *:before, *:after { box-sizing: border-box; }
+			html, body { padding: 0; margin: 0; height: 100%;}
+
+			/*scrollbard*/
+			*::-webkit-scrollbar-corner {
+				background-color: transparent;
+			}
+			*::-webkit-scrollbar {
+				width: 9px;
+				height: 9px;
+			}
+
+			*::-webkit-scrollbar-thumb {
+				background-color: rgba(0,0,0,0.2);
+				-webkit-box-shadow: inset 1px 1px 0 rgba(0,0,0,0.10),inset 0 -1px 0 rgba(0,0,0,0.07);
+			}
+		</style>
+	</head>
+
+	<body ng-controller="AppCtrl">
+		<finder-view ng-repeat="finderId in finderInstances" finderview-instance-id="finderId"></finder-view>
+	</body>
+
+	<script src="node_modules/angular/angular.min.js"></script>
+	<script> "use strict";
+		const node_os = require('os');
+		const node_fs = require('fs');
+		const node_path = require('path');
+		const DS = node_path.sep;
+		const node_child_process = require('child_process');
+
+		var cache = {};
+
+		var app = angular.module('app', []);
+
+		app.directive('finderView', [()=>{
+			
+			/**
+			 * Those styles get appended to the head only once
+			 */
+			var styles = `
+				<style id="finderViewStyles">
+					.finderview { float: left; width: 50%; outline: 1px solid black; height: 100%; }
+					.finderview > ul { height: calc(100% - 50px - 30px); overflow-y: scroll; ove_rflow-x: hidden; }
+					.finderview > ul li { white-space: nowrap; text-overflow: ellipsis; width: 100%; overflow: hidden; }
+				
+					.finderview > div:first-child { height: 50px; }
+					.finderview > div:last-child  { height: 30px; }
+
+					.finderview__item--isDirectory { color: #555; text-decoration: none; }
+					.finderview__item--isFile { color: green; text-decoration: none; }
+					.finderview__item--isSymbolicLink { color: red; text-decoration: none; }
+				</style>`;
+
+			/**
+			 * Template for every instance of finderView directive
+			 */
+			var template = `
+				<section class="finderview">
+					<div>
+						{{directory_path}}<br><input type="text" ng-model="querystring" />
+						<button type="button" ng-click="openParentDir()">..</button>
+					</div>
+					<ul>
+						<li ng-repeat="node in viewResultList | filter:querystring">
+							<a href="#" ng-click="open(node)" title="{{node}}" ng-class="{'finderview__item--isFile' : cache[node].isFile(), 'finderview__item--isDirectory' : cache[node].isDirectory(), 'finderview__item--isSymbolicLink' :cache[node].isSymbolicLink()}">{{basename(node)}} <span ng-If="node !== cache[node].custom_realPath">({{cache[node].custom_realPath}})</span></a>
+						</li>
+					</ul>
+					<div style="background-color: red;">
+						{{directory_path}}
+					</div>
+				</section>`;
+
+			return {
+				scope:{
+		          finderviewInstanceId: "=" // unique id for the localStorage
+		        },
+				//replace: true,
+				template: template,
+				controller: function($scope, $element){
+
+					var 
+						directory = [], // contains a list of fullpaths for the directory recently read 
+						$input = $element[0].querySelector('[ng-model="querystring"]'); // userinput-field for the querystring we utilize to filter the output
+
+					$scope.cache = cache; // containing all nodeInfos of the collected paths 
+					$scope.viewResultList = []; // the list of results presented in the view
+					$scope.directory_path = null; // the current directory path of the directory at hand
+
+					$scope.$watch('querystring', onQuerystringChange); // kommt noch in die link-methode
+
+					// initially present recent directory OR rootdir
+					_readDir(_storage('directory_path') || node_path.resolve(DS), (path)=>{
+						document.title = path;
+						_updateResult(directory);
+						_resetQueryString();
+					});
+
+					// NOT YET IN USE
+					function onQuerystringChange(new_value){
+						if(!new_value) return;
+
+						if(new_value[0] === '?'){
+							$scope.viewResultList = cache;
+						}else{
+							$scope.viewResultList = directory;
+						}
+					}
+
+					/**
+					 * Obtain fylesystem info for a node passed a fullpath for
+					 * @param string fullpath The fullpath of the node we want acquire info from
+					 * @return false|object Return false if file is not accessable or an object containing status info
+					 */
+					function _getNodeFromFilesystem(fullpath){
+						var nodeInfo;
+						try{
+							nodeInfo = node_fs.lstatSync(fullpath); // some files are not accessible since they are provided by the underlaying OS
+						}catch($err){
+							return false;
+						}
+
+						var realPath = node_path.normalize(node_fs.realpathSync(fullpath));
+						
+						nodeInfo.custom_realPath = realPath;
+						nodeInfo.custom_path = fullpath;
+
+						if(realPath != fullpath){
+							return _getNodeFromFilesystem(realPath);
+						}
+						return nodeInfo;
+					}
+
+					/**
+					 * Return the last portion of a path. Similar to the Unix basename command.
+					 */
+					$scope.basename = function(path){
+						return node_path.basename(path);
+					}
+
+					/**
+					 * The passed nodename prepended by the corresponding (current) directory path
+					 */
+					function _fullpath(node){
+						return node_path.join($scope.directory_path, node);
+					}
+
+					////////////////////////////////////////////////////////////////////////////////////
+					//// VIEWS RESULT-LIST
+					////////////////////////////////////////////////////////////////////////////////////
+
+					function _updateResult(resultList){
+						$scope.viewResultList = _sortResultList(resultList);
+						$scope.$apply();
+					}
+
+					/**
+					 * Sort either by name or type - how can we do both at the same time?
+					 */
+					function _sortResultList(resultList){
+						/*
+						resultList = resultList.sort(function (a, b) {
+							return a.toLowerCase().localeCompare(b.toLowerCase());
+						});
+						/*/
+						resultList = resultList.sort(function(a, b){
+							if(cache[a].isDirectory()){
+								return -1;
+							}
+							if(cache[a].isSymbolicLink()){
+								//console.log(JSON.parse(JSON.stringify(cache[a])));
+								return 0;
+							}
+							if(cache[a].isFile()){
+								return 1;
+							}
+						});
+						//*/
+
+						return resultList;
+					}
+
+					////////////////////////////////////////////////////////////////////////////////////
+					//// QUERY-INPUT FIELD
+					////////////////////////////////////////////////////////////////////////////////////
+
+					function _resetQueryString(){
+						$scope.querystring = "";
+						$scope.$apply();
+					}
+
+					/**
+					 * 
+					 */
+					function _focusInput(){
+						 $input.focus();
+					}
+					
+					$scope.onFocusInput = function(){
+						document.title = $scope.directory_path;
+					}
+
+					////////////////////////////////////////////////////////////////////////////////////
+					//// USER NAVIGATION ACTIONS
+					////////////////////////////////////////////////////////////////////////////////////
+
+					/**
+					 * 
+					 */
+					$scope.open = function( path ){
+						var node_info = _cacheGet(path);
+						if(node_info.isDirectory()){
+							_readDir(node_info.custom_path, (path)=>{
+								document.title = path;
+								_updateResult(directory);
+								_resetQueryString();
+							});
+						}else if(node_info.isFile()){
+							const child = node_child_process.exec(path, (error, stdout, stderr) => {
+								if (error) {
+									throw error;
+								}
+							});
+						}
+						
+						_focusInput();
+					}
+
+					/**
+					 * Open parent directory of current directory
+					 */
+					$scope.openParentDir = function(){
+						var isRootDir = $scope.directory_path === DS;
+						if(isRootDir) return;
+
+						var path = node_path.resolve($scope.directory_path, '../');
+						_readDir(path, (path)=>{
+							document.title = path;
+							_updateResult(directory);
+							_resetQueryString();
+						});
+						
+						_focusInput();
+					}
+
+					/**
+					 * Read passed directory and updates views resultList
+					 * @param string path The path of the directory to be read
+					 * @return void
+					 */
+					function _readDir(path, callback){
+						callback = callback || function(){};
+
+						$scope.directory_path = path;
+
+						node_fs.readdir($scope.directory_path, (err, data) => {
+							if (err){
+
+								console.error(path, err);
+								return;
+							};
+							
+							_storage('directory_path', path); // remember last directorypath to get there on restart
+							
+							
+
+							// create list of all nodes in the directory
+							directory = [];
+							data.forEach((basename) => {
+								directory.push(_fullpath(basename));
+							});
+
+							// filter directory and update cache
+							directory = directory.filter((fullpath) => {
+								var nodeInfo = _getNodeFromFilesystem(fullpath);
+								if(nodeInfo === false){
+									return false;
+								}
+
+								// if(fullpath === 'C:\\Users\\All Users'){
+								// 	console.log(nodeInfo, nodeInfo.isDirectory())
+								// }
+								_cacheSet(fullpath, nodeInfo);
+								
+								return true;
+							});
+
+							callback(path);
+						});
+					}
+
+					////////////////////////////////////////////////////////////////////////////////////
+					//// CACHE
+					////////////////////////////////////////////////////////////////////////////////////
+					
+					function _cacheSet(fullpath, nodeInfo){
+						cache[fullpath] = nodeInfo;
+					}
+
+					function _cacheGet(path){
+						return cache[path];
+					}
+
+					////////////////////////////////////////////////////////////////////////////////////
+					//// STORAGE
+					////////////////////////////////////////////////////////////////////////////////////
+
+					/**
+					 * Get/Set a value in the storage by the respected namespace ('finderView-n')
+					 * @return mixed
+					 */
+					function _storage(){
+						var 
+							key = 'finderView-' + $scope.finderviewInstanceId +'_'+ arguments[0],
+							value = arguments[1];
+
+						if(value === undefined){
+							return localStorage.getItem(key);
+						}else {
+							return localStorage.setItem(key, value);
+						}
+					}
+
+				},
+				link: function(scope, element){
+					var $input = element[0].querySelector('[ng-model="querystring"]');
+
+					$input.addEventListener('focus', scope.onFocusInput);
+
+					if(document.querySelector('#finderViewStyles') === null){
+						document.head.insertAdjacentHTML( 'beforeend', styles );
+					}
+				}
+			};
+		}]);
+
+		/**
+		 * Querystring filter matches all nodes ignoring querystringdirectives
+		 * @param  node
+		 * @return bool
+		 */
+		app.filter('filterByQuerystring', function() {
+			return function(val, querystring) {
+				querystring = querystring.indexOf('?') === 0 ? querystring.substr(1) : querystring;
+				return val.indexOf(querystring) > -1;
+			};
+		});
+
+		app.controller('AppCtrl', function ($scope) {
+			//*
+			$scope.finderInstances = [1];
+			/*/
+			$scope.finderInstances = [1, 2];
+			//*/
+		});
+	</script>
+</html>
