@@ -80,9 +80,10 @@
 						.finderview { height: 100%; flex-grow: 1; width: 0; }
 						.finderview > ul { height: calc(100% - 65rem - 30rem); overflow-y: scroll; hidden; padding: 10rem 0; }
 						.finderview > ul li { white-space: nowrap; text-overflow: ellipsis; width: 100%; overflow: hidden; }
-						.finderview > ul li a { display: block; padding: 0 10rem; }
+						.finderview > ul li a { display: block; padding: 0 10rem 0 0; }
 						.finderview > ul li a:hover,
 						.finderview > ul li a:focus { background: rgba(0,0,0,0.2); }
+						.finderview > ul li a:before { content: attr(data-i); display: inline-block; font-size: 16rem; width: 2em; color: #999; bac_kground: #F0F2F1; text-align: right; }
 					
 						.finderview > div:first-child { position: relative; overflow: hidden; height: 65rem; }
 						.finderview > div:last-child  { height: 30rem; overflow: hidden; text-overflow: ellipsis; }
@@ -92,7 +93,7 @@
 						.finderview > div:last-child { background: #222228; color: #EB5424; padding: 5rem; }
 
 						.finderview__item--isDirectory { color: #555; }
-						.finderview__item--isFile { color: green; }
+						.finderview__item--isFile { color: #2E7D32; }
 						.finderview__item--isSymbolicLink { color: red; }
 					</style>`;
 
@@ -108,8 +109,8 @@
 						</div>
 						<ul>
 							<li><a href="#" ng-click="openParentDir()">..</a></li>
-							<li ng-repeat="node in viewResultList | filter:querystring">
-								<a href="#" ng-click="open(node)" title="{{node}}" ng-class="{'finderview__item--isFile' : cache[node].isFile(), 'finderview__item--isDirectory' : cache[node].isDirectory(), 'finderview__item--isSymbolicLink' :cache[node].isSymbolicLink()}">
+							<li ng-repeat="(i, node) in viewResultList | filter:querystring">
+								<a href="#" data-i="{{i}}" ng-click="open(node)" title="{{node}}" ng-class="{'finderview__item--isFile' : cache[node].isFile(), 'finderview__item--isDirectory' : cache[node].isDirectory(), 'finderview__item--isSymbolicLink' :cache[node].isSymbolicLink()}">
 									<i class="fa fa-folder-o" ng-If="cache[node].isDirectory()"></i>
 									{{basename(node)}} 
 									<span ng-If="node !== cache[node].custom_realPath" style="font-size: 0.7em; ">({{cache[node].custom_realPath}})</span>
