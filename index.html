@@ -49,11 +49,14 @@
 			}
 			a { text-decoration: none; }
 
+			.collection-finderviews { height: 100%; display: flex; flex-direction: row;  }
 		</style>
 	</head>
 
 	<body ng-controller="AppCtrl">
-		<finder-view ng-repeat="finderId in finderInstances" finderview-instance-id="finderId"></finder-view>
+		<div class="collection-finderviews">
+			<finder-view class="finderview" ng-repeat="finderId in finderInstances" finderview-instance-id="finderId"></finder-view>
+		</div>
 
 		<script src="node_modules/angular/angular.min.js"></script>
 		<script> "use strict";
@@ -74,35 +77,32 @@
 				 */
 				var styles = `
 					<style id="finderViewStyles">
-						.finderview { float: left; width: 50%; out_line: 1px solid black; height: 100%; }
-						.finderview > ul { height: calc(100% - 65rem - 30rem); overflow-y: scroll; ove_rflow-x: hidden; padding: 10rem 0; }
+						.finderview { height: 100%; flex-grow: 1; width: 0; }
+						.finderview > ul { height: calc(100% - 65rem - 30rem); overflow-y: scroll; hidden; padding: 10rem 0; }
 						.finderview > ul li { white-space: nowrap; text-overflow: ellipsis; width: 100%; overflow: hidden; }
 						.finderview > ul li a { display: block; padding: 0 10rem; }
 						.finderview > ul li a:hover,
 						.finderview > ul li a:focus { background: rgba(0,0,0,0.2); }
 					
-						.finderview > div:first-child { height: 65rem; overflow: hidden; text-overflow: ellipsis; }
+						.finderview > div:first-child { position: relative; overflow: hidden; height: 65rem; }
 						.finderview > div:last-child  { height: 30rem; overflow: hidden; text-overflow: ellipsis; }
 						
-						.finderview > div:first-child [ng-model="querystring"] { display: block; width: 100%; height: 34rem; padding: 6rem 12rem; font-size: 14rem; line-height: 1.42857143; color: #555; background-color: #fff; border: 1px solid #ccc; bord_er-radius: 4px; box-shadow: inset 0 1px 1px rgba(0,0,0,.075);}
-
+						.finderview > div:first-child [ng-model="querystring"] { display: block; margin: 29rem 0 0 0; width: 100%; height: 34rem; padding: 6rem 12rem; font-size: 14rem; line-height: 1.42857143; color: #555; background-color: #fff; border: 1px solid #ccc; box-shadow: inset 0 1px 1px rgba(0,0,0,.075); color: #EB5424 }
+						.finderview > div:first-child span { position: absolute; min-width: 100%; top: 0; right: 0; display: block; padding: 5px; height: 29rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12rem;}
 						.finderview > div:last-child { background: #222228; color: #EB5424; padding: 5rem; }
 
 						.finderview__item--isDirectory { color: #555; }
 						.finderview__item--isFile { color: green; }
 						.finderview__item--isSymbolicLink { color: red; }
-
-
 					</style>`;
 
 				/**
 				 * Template for every instance of finderView directive
 				 */
 				var template = `
-					<section class="finderview">
 						<div>
 							<form ng-submit="enter()">
-								<span style="display: inline-block; padding: 5px;">{{directory_path}}</span>
+								<span title="{{directory_path}}">{{directory_path}}</span>
 								<input type="text" ng-model="querystring" />
 							</form>	
 						</div>
@@ -118,8 +118,7 @@
 						</ul>
 						<div>
 							{{directory_path}}
-						</div>
-					</section>`;
+						</div>`;
 
 				return {
 					scope:{
@@ -430,12 +429,33 @@
 				};
 			});
 
-			app.controller('AppCtrl', function ($scope) {
-				/*
-				$scope.finderInstances = [1];
-				/*/
-				$scope.finderInstances = [1, 2];
-				//*/
+			app.controller('AppCtrl', function ($scope, $element) {
+				// handle ctrl+1, ctrl+2, ctrl+3, ctrl+4 to update amount of finderViewInsatnces
+				var gridKeys = [1,2,3,4];
+				$element[0].addEventListener('keydown', function(e){
+					if(e.ctrlKey && gridKeys.indexOf(parseInt(String.fromCharCode(e.keyCode))) !== -1){
+						var numberInstances = parseInt(String.fromCharCode(e.keyCode), 10);
+						showNumberFinderViews(numberInstances);
+						$scope.$apply();
+					}
+				});
+
+				/**
+				 * Update $scope.finderInstances so view shows up desired amount of finderInstances
+				 */
+				function showNumberFinderViews (numberInstances){
+					var range = [];
+					for(var i = 1; i <= numberInstances; i++){
+						range.push(i);
+					}
+					$scope.finderInstances = range;
+						
+					// remmeber that setting
+					localStorage.setItem('AppCtrl_numberFinderInstances', numberInstances);
+				}
+
+				// show last amount of finderInstances
+				showNumberFinderViews(localStorage.getItem('AppCtrl_numberFinderInstances') || 1);
 			});
 		</script>
 	</body>
