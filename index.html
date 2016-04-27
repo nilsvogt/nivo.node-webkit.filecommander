@@ -2,7 +2,7 @@
 	NOTE:
 	directory[n] = some/path/that/also/could/be/a/symlink
 	cache[some/path/that/also/could/be/a/symlink].custom_path contains the resolved symlinkpath
-	
+
 	Todo:
 	- searchable cache
 	- command router middleware
@@ -20,14 +20,14 @@
 		<link href='https://fonts.googleapis.com/css?family=Roboto' rel='stylesheet' type='text/css'>
 		<style type="text/css">
 			/* reset */
-			* { 
+			* {
 				margin: 0; padding: 0; outl_ine: 1px dashed blue;
 			}
-			*, *:before, *:after { 
-				box-sizing: border-box; 
+			*, *:before, *:after {
+				box-sizing: border-box;
 			}
 			*:focus { outline: none; }
-			
+
 			/*scrollbar*/
 			*::-webkit-scrollbar-corner {
 				background-color: transparent;
@@ -41,7 +41,7 @@
 			}
 
 			/* generals */
-			html, body { 
+			html, body {
 				height: 100%; font-size: 1px;
 			}
 			body {
@@ -51,12 +51,21 @@
 			a { text-decoration: none; }
 
 			.collection-finderviews { height: 100%; display: flex; flex-direction: row;  }
+
+			context-menu ul { display: block; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.2); }
+			context-menu ul li { background: red; }
 		</style>
 	</head>
 
 	<body ng-controller="AppCtrl">
 		<div class="collection-finderviews">
 			<finder-view class="finderview" ng-repeat="finderId in finderInstances" finderview-instance-id="finderId"></finder-view>
+
+			<context-menu>
+				<ul ng-show="menu">
+					<li ng-repeat="node in menu" ng-click="perform(node.action)">{{node.name}}</li>
+				</ul>
+			</context-menu>
 		</div>
 
 		<script src="node_modules/angular/angular.min.js"></script>
@@ -71,8 +80,117 @@
 
 			var app = angular.module('app', []);
 
+			////////////////////////////////////////////////////////////////////////////////////
+			//// CONTEXT MENU
+			////////////////////////////////////////////////////////////////////////////////////
+
+			app.factory('contextMenuOpenShell', function(){
+				var platform;
+
+				function openInShell(directory){
+					var cmd;
+
+					// escape directory
+					directory = directory.replace(/(["\s'$`\\])/g,'\\$1');
+
+					if (platform === 'win32' || platform === 'win64') { // WIN
+						cmd = "START cmd.exe /k cd "+directory;
+					} else if (platform === 'darwin') { // OSX
+						cmd = "open -a Terminal "+directory;
+					} else if (platform === 'linux') { // LINUX
+						cmd = "xterm -e 'cd "+directory+"'";
+					}
+
+					console.log(cmd);
+
+					// invoke cmd
+					node_child_process.exec(cmd);
+				}
+
+				return function(fullpath){
+					var nodeInfo;
+					try{
+						nodeInfo = node_fs.lstatSync(fullpath); // some files are not accessible since they are provided by the underlaying OS
+					}catch(err){
+						console.error(err);
+						return;
+					}
+
+					// we only want to open directories in a shell
+					if(!nodeInfo.isDirectory()){
+						console.info('You can not open other than directories in a shell');
+						return;
+					}
+
+					var supported_os = ['win32', 'win64', 'darwin', 'linux'];
+
+					platform = node_os.platform();
+
+					if(supported_os.indexOf(platform) === -1){
+						console.error('contextMenuOpenShell does not support platform '+platform);
+						return;
+					}
+
+					return { name: 'Open in shell', action: openInShell};
+				}
+			});
+
+			app.factory('contextMenuModel', function(contextMenuOpenShell){
+				return function(path){
+					return [contextMenuOpenShell(path)];
+				}
+			});
+
+			app.directive('contextMenu', ()=>{
+				return {
+					controller: function($scope, $element, contextMenuModel){
+						var path_current = null;
+						/**
+						 * Provides the menu to the view
+						 * @param  string path The path we are about to present the contextmenu for
+						 * @return void
+						 */
+						$scope.showMenu = function(path){
+							path_current = path;
+							var menu = contextMenuModel(path);
+							if(menu.length === 0) return;
+
+							$scope.menu = contextMenuModel(path);
+							// TODO: set focus and handle tab on your own in order to not focus elements behind the context menu
+						}
+
+						$scope.closeMenu = function(){
+							$scope.menu = null;
+						}
+
+						$scope.perform  = function(action){
+							action.call(null, path_current);
+							$scope.closeMenu();
+						}
+					},
+					link: function(scope){
+						document.addEventListener('keydown', function(e){
+							if(e.ctrlKey && e.code === 'Enter'){
+								e.preventDefault();
+
+								var target = document.activeElement;
+								if(target.classList.contains('finderview__item--isDirectory')){
+									var path = target.title;
+									scope.showMenu(path);
+									scope.$apply();
+								}
+							}
+						})
+					}
+				}
+			});
+
+			////////////////////////////////////////////////////////////////////////////////////
+			//// FINDER VIEW
+			////////////////////////////////////////////////////////////////////////////////////
+
 			app.directive('finderView', [()=>{
-				
+
 				/**
 				 * Those styles get appended to the head only once
 				 */
@@ -85,11 +203,11 @@
 						.finderview > ul li a:hover,
 						.finderview > ul li a:focus { background: rgba(0,0,0,0.2); }
 						.finderview > ul li a:before { content: attr(data-i); display: inline-block; font-size: 16rem; width: 2em; color: #999; bac_kground: #F0F2F1; text-align: right; }
-					
+
 						.finderview > div:first-child { position: relative; overflow: hidden; height: 65rem; }
 						.finderview > div:first-child [ng-model="querystring"] { display: block; margin: 29rem 0 0 0; width: 100%; height: 34rem; padding: 6rem 12rem; font-size: 14rem; line-height: 1.42857143; color: #555; background-color: #fff; border: 1px solid #ccc; border-right: 0; box-shadow: inset 0 1px 1px rgba(0,0,0,.075); color: #EB5424 }
 						.finderview > div:first-child span { position: absolute; min-width: 100%; top: 0; right: 0; display: block; padding: 9rem 12rem; height: 29rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12rem; background: #222228; color: #EB5424;}
-						
+
 						.finderview > div:last-child  { height: 30rem; overflow: hidden; text-overflow: ellipsis;  padding: 5rem;}
 
 						.finderview__item--isDirectory { color: #555; }
@@ -106,14 +224,14 @@
 							<form ng-submit="enter()">
 								<span title="{{directory_path}}">{{directory_path}}</span>
 								<input type="text" placeholder="What are you looking for?" ng-model="querystring" />
-							</form>	
+							</form>
 						</div>
 						<ul>
 							<li><a href="#" ng-click="openParentDir()">..</a></li>
 							<li ng-repeat="(i, node) in viewResultList | filter:querystring">
 								<a href="#" data-i="{{i}}" ng-click="open(node)" title="{{node}}" ng-class="{'finderview__item--isFile' : cache[node].isFile(), 'finderview__item--isDirectory' : cache[node].isDirectory(), 'finderview__item--isSymbolicLink' :cache[node].isSymbolicLink()}">
 									<i class="fa fa-folder-o" ng-If="cache[node].isDirectory()"></i>
-									{{basename(node)}} 
+									{{basename(node)}}
 									<span ng-If="node !== cache[node].custom_realPath" style="font-size: 0.7em; ">({{cache[node].custom_realPath}})</span>
 								</a>
 							</li>
@@ -124,17 +242,16 @@
 
 				return {
 					scope:{
-			          finderviewInstanceId: "=" // unique id for the localStorage
-			        },
+								finderviewInstanceId: "=" // unique id for the localStorage
+							},
 					//replace: true,
 					template: template,
 					controller: function($scope, $element){
-
-						var 
-							directory = [], // contains a list of fullpaths for the directory recently read 
+						var
+							directory = [], // contains a list of fullpaths for the directory recently read
 							$input = $element[0].querySelector('[ng-model="querystring"]'); // userinput-field for the querystring we utilize to filter the output
 
-						$scope.cache = cache; // containing all nodeInfos of the collected paths 
+						$scope.cache = cache; // containing all nodeInfos of the collected paths
 						$scope.viewResultList = []; // the list of results presented in the view
 						$scope.directory_path = null; // the current directory path of the directory at hand
 
@@ -172,7 +289,7 @@
 							}
 
 							var realPath = node_path.normalize(node_fs.realpathSync(fullpath));
-							
+
 							nodeInfo.custom_realPath = realPath;
 							nodeInfo.custom_path = fullpath;
 
@@ -216,7 +333,7 @@
 							});
 							/*/
 							resultList = resultList.sort(function(a, b){
-								var 
+								var
 									a_sort = (cache[a].isDirectory() ? 'DIR' : 'FILE') + a,
 									b_sort = (cache[b].isDirectory() ? 'DIR' : 'FILE') + b,
 									comparison = a_sort.toLowerCase().localeCompare(b_sort.toLowerCase());
@@ -224,7 +341,7 @@
 									comparison = a_sort.localeCompare(b_sort);
 								}
 								return comparison;
-								
+
 							});
 							//*/
 
@@ -241,12 +358,12 @@
 						}
 
 						/**
-						 * 
+						 *
 						 */
 						function _focusInput(){
 							 $input.focus();
 						}
-						
+
 						$scope.onFocusInput = function(){
 							document.title = $scope.directory_path;
 						}
@@ -256,7 +373,7 @@
 						////////////////////////////////////////////////////////////////////////////////////
 
 						/**
-						 * 
+						 *
 						 */
 						$scope.open = function( path ){
 							var node_info = _cacheGet(path);
@@ -273,7 +390,7 @@
 									}
 								});
 							}
-							
+
 							_focusInput();
 						}
 
@@ -282,7 +399,7 @@
 						}
 
 						$scope.focusNextNode = function(){
-							var 
+							var
 								nodes = [].slice.call($element[0].querySelector('ul').children),
 								focuesdNode = $element[0].querySelector('ul li a:focus').parentElement,
 								index = nodes.indexOf(focuesdNode),
@@ -292,7 +409,7 @@
 						}
 
 						$scope.focusPreviousNode = function(){
-							var 
+							var
 								nodes = [].slice.call($element[0].querySelector('ul').children),
 								focuesdNode = $element[0].querySelector('ul li a:focus').parentElement,
 								index = nodes.indexOf(focuesdNode),
@@ -314,7 +431,7 @@
 								_updateResult(directory);
 								_resetQueryString();
 							});
-							
+
 							_focusInput();
 						}
 
@@ -334,10 +451,10 @@
 									console.error(path, err);
 									return;
 								};
-								
+
 								_storage('directory_path', path); // remember last directorypath to get there on restart
-								
-								
+
+
 
 								// create list of all nodes in the directory
 								directory = [];
@@ -356,7 +473,7 @@
 									// 	console.log(nodeInfo, nodeInfo.isDirectory())
 									// }
 									_cacheSet(fullpath, nodeInfo);
-									
+
 									return true;
 								});
 
@@ -367,7 +484,7 @@
 						////////////////////////////////////////////////////////////////////////////////////
 						//// CACHE
 						////////////////////////////////////////////////////////////////////////////////////
-						
+
 						function _cacheSet(fullpath, nodeInfo){
 							cache[fullpath] = nodeInfo;
 						}
@@ -385,7 +502,7 @@
 						 * @return mixed
 						 */
 						function _storage(){
-							var 
+							var
 								key = 'finderView-' + $scope.finderviewInstanceId +'_'+ arguments[0],
 								value = arguments[1];
 
@@ -400,8 +517,10 @@
 					link: function(scope, element){
 						var $input = element[0].querySelector('[ng-model="querystring"]');
 
+						// handle focus of searchStringInput
 						$input.addEventListener('focus', scope.onFocusInput);
 
+						// handle [UP] and [DOWN] keys
 						element[0].addEventListener('keydown', function(e){
 							if(e.keyCode === 38){ // up
 								e.preventDefault(); // prevent from triggering scrolling the scrollbar
@@ -410,8 +529,9 @@
 								e.preventDefault(); // prevent from triggering scrolling the scrollbar
 								scope.focusNextNode();
 							}
-						})
+						});
 
+						// insert CSS only once
 						if(document.querySelector('#finderViewStyles') === null){
 							document.head.insertAdjacentHTML( 'beforeend', styles );
 						}
@@ -451,7 +571,7 @@
 						range.push(i);
 					}
 					$scope.finderInstances = range;
-						
+
 					// remmeber that setting
 					localStorage.setItem('AppCtrl_numberFinderInstances', numberInstances);
 				}
