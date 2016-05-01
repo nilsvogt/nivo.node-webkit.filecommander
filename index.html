@@ -6,11 +6,14 @@
 	Todo:
 	- searchable cache
 	- command router middleware
-	- submit querystring should execute first result in filtered resultlist
 
+	In Progress:
+	- Context menu
+	
 	Done:
 	- sorted resultList
 	- flexbox
+	- submit querystring should execute first result in filtered resultlist
 -->
 <!DOCTYPE html>
 <html ng-app="app">
@@ -200,7 +203,7 @@
 						.finderview > ul { height: calc(100% - 65rem - 30rem); overflow-y: scroll; hidden; padding: 10rem 0; border-left: 1px dashed #ccc; }
 						.finderview > ul li { white-space: nowrap; text-overflow: ellipsis; width: 100%; overflow: hidden; }
 						.finderview > ul li a { display: block; padding: 0 0 0 0; }
-						.finderview > ul li a:hover,
+						.finderview > ul li a:hover { background: rgba(0,0,0,0.1); }
 						.finderview > ul li a:focus { background: rgba(0,0,0,0.2); }
 						.finderview > ul li a:before { content: attr(data-i); display: inline-block; font-size: 16rem; width: 2em; color: #999; bac_kground: #F0F2F1; text-align: right; }
 
@@ -221,14 +224,14 @@
 				 */
 				var template = `
 						<div>
-							<form ng-submit="enter()">
+							<form ng-submit="submitSearch()">
 								<span title="{{directory_path}}">{{directory_path}}</span>
 								<input type="text" placeholder="What are you looking for?" ng-model="querystring" />
 							</form>
 						</div>
 						<ul>
 							<li><a href="#" ng-click="openParentDir()">..</a></li>
-							<li ng-repeat="(i, node) in viewResultList | filter:querystring">
+							<li ng-repeat="(i, node) in (filteredResults = (viewResultList | filterResults:querystring))">
 								<a href="#" data-i="{{i}}" ng-click="open(node)" title="{{node}}" ng-class="{'finderview__item--isFile' : cache[node].isFile(), 'finderview__item--isDirectory' : cache[node].isDirectory(), 'finderview__item--isSymbolicLink' :cache[node].isSymbolicLink()}">
 									<i class="fa fa-folder-o" ng-If="cache[node].isDirectory()"></i>
 									{{basename(node)}}
@@ -360,7 +363,7 @@
 						/**
 						 *
 						 */
-						function _focusInput(){
+						$scope.focusInput = function(){
 							 $input.focus();
 						}
 
@@ -391,22 +394,42 @@
 								});
 							}
 
-							_focusInput();
+							$scope.focusInput();
 						}
 
-						$scope.enter = function(){
-							console.log('enter')
+						$scope.openFocusedNode = function(){
+							var
+								nodes = [].slice.call($element[0].querySelector('ul').children),
+								focusedNode = document.activeElement.parentElement,
+								index = nodes.indexOf(focusedNode);
+							
+							// make sure focused element is an item in the list. Otherwise stop processing here.
+							if(index === -1) return;
+
+							$scope.open(document.activeElement.title);
+						}
+
+						$scope.submitSearch = function(){
+							console.log('SUBMIT')
+							
+							if(!$scope.filteredResults.length) return;
+							$scope.open($scope.filteredResults[0]);
 						}
 
 						$scope.focusNextNode = function(){
 							var
 								nodes = [].slice.call($element[0].querySelector('ul').children),
-								focuesdNode = $element[0].querySelector('ul li a:focus').parentElement,
-								index = nodes.indexOf(focuesdNode),
-								index_next = index+1, // remember that nth-child begins to count at 1
-								nextNode = $element[0].querySelector('ul li:nth-child('+ (index_next%nodes.length+1) +') a');
+								focusedNode = document.activeElement.parentElement,
+								index = nodes.indexOf(focusedNode),
+								nextNode = $element[0].querySelector('ul li:first-child a'); // default next item is the first item
+
+							if(index > -1){ // if focusedNode was found in nodecollection we can grab the next sibling otherwise we just focus the first element
+								nextNode = $element[0].querySelector('ul li:nth-child('+ (((index+1)%nodes.length)+1) +') a');
+							}
+
 							nextNode.focus();
 						}
+
 
 						$scope.focusPreviousNode = function(){
 							var
@@ -432,7 +455,7 @@
 								_resetQueryString();
 							});
 
-							_focusInput();
+							$scope.focusInput();
 						}
 
 						/**
@@ -522,12 +545,23 @@
 
 						// handle [UP] and [DOWN] keys
 						element[0].addEventListener('keydown', function(e){
+							if(e.keyCode === 16) return; // shiftleft + shiftright
+							if(e.code === 'Tab') return; // Tab is used natively 
+							if(e.code === 'Enter') return; // prevent form from being submitted (To be honest, I dont relly know why the form should get submitted but it does so when we not return here..)
+
 							if(e.keyCode === 38){ // up
 								e.preventDefault(); // prevent from triggering scrolling the scrollbar
 								scope.focusPreviousNode();
 							}else if(e.keyCode === 40){ // down
 								e.preventDefault(); // prevent from triggering scrolling the scrollbar
 								scope.focusNextNode();
+							}else if(e.keyCode === 39){ // right
+								scope.openFocusedNode();
+							}else if(e.keyCode === 37){ // right
+								scope.openParentDir();
+							}else if(e.which !== 0 && !e.ctrlKey && !e.metaKey && !e.altKey){ // handle all printable characters
+								console.log('RECEIVING input', e)
+								scope.focusInput();
 							}
 						});
 
@@ -539,18 +573,21 @@
 				};
 			}]);
 
-			/**
-			 * Querystring filter matches all nodes ignoring querystringdirectives
-			 * @param  node
-			 * @return bool
-			 */
-			app.filter('filterByQuerystring', function() {
-				return function(val, querystring) {
-					querystring = querystring.indexOf('?') === 0 ? querystring.substr(1) : querystring;
-					return val.indexOf(querystring) > -1;
+			app.filter('filterResults', function() {
+				return function(items, querystring) {
+					var filtered = [];
+
+					for (var i = 0; i < items.length; i++) {
+						var item = items[i];
+						if (new RegExp('^.*'+querystring+'[^\\\\]*$', 'i').test(item)) {
+							filtered.push(item);
+						}
+					}
+
+					return filtered;
 				};
 			});
-
+			
 			app.controller('AppCtrl', function ($scope, $element) {
 				// handle ctrl+1, ctrl+2, ctrl+3, ctrl+4 to update amount of finderViewInsatnces
 				var gridKeys = [1,2,3,4];
