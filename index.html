@@ -6,10 +6,13 @@
 	Todo:
 	- searchable cache
 	- command router middleware
+		- :shell [open cwd in terminal]
+			- create mappings for features
+	- [strg+TAB] => focus next findervier [shift+strg+TAB] => focus prev findervier
 
 	In Progress:
 	- Context menu
-	
+
 	Done:
 	- sorted resultList
 	- flexbox
@@ -402,7 +405,7 @@
 								nodes = [].slice.call($element[0].querySelector('ul').children),
 								focusedNode = document.activeElement.parentElement,
 								index = nodes.indexOf(focusedNode);
-							
+
 							// make sure focused element is an item in the list. Otherwise stop processing here.
 							if(index === -1) return;
 
@@ -411,7 +414,7 @@
 
 						$scope.submitSearch = function(){
 							console.log('SUBMIT')
-							
+
 							if(!$scope.filteredResults.length) return;
 							$scope.open($scope.filteredResults[0]);
 						}
@@ -546,7 +549,7 @@
 						// handle [UP] and [DOWN] keys
 						element[0].addEventListener('keydown', function(e){
 							if(e.keyCode === 16) return; // shiftleft + shiftright
-							if(e.code === 'Tab') return; // Tab is used natively 
+							if(e.code === 'Tab') return; // Tab is used natively
 							if(e.code === 'Enter') return; // prevent form from being submitted (To be honest, I dont relly know why the form should get submitted but it does so when we not return here..)
 
 							if(e.keyCode === 38){ // up
@@ -587,7 +590,7 @@
 					return filtered;
 				};
 			});
-			
+
 			app.controller('AppCtrl', function ($scope, $element) {
 				// handle ctrl+1, ctrl+2, ctrl+3, ctrl+4 to update amount of finderViewInsatnces
 				var gridKeys = [1,2,3,4];
