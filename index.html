@@ -4,19 +4,20 @@
 	cache[some/path/that/also/could/be/a/symlink].custom_path contains the resolved symlinkpath
 
 	Todo:
-	- searchable cache
-	- command router middleware
-		- :shell [open cwd in terminal]
-			- create mappings for features
+	- persisted cache (shared for all finderview insances)
 	- [strg+TAB] => focus next findervier [shift+strg+TAB] => focus prev findervier
 
 	In Progress:
 	- Context menu
 
 	Done:
+	- InputRouter
 	- sorted resultList
 	- flexbox
 	- submit querystring should execute first result in filtered resultlist
+	- :shell [open cwd in terminal]
+	- leading '?' searches in the cache
+	- AbstractFeature / FeatureProvider
 -->
 <!DOCTYPE html>
 <html ng-app="app">
@@ -87,69 +88,77 @@
 			var app = angular.module('app', []);
 
 			////////////////////////////////////////////////////////////////////////////////////
+			//// INPUT ROUTER
+			////////////////////////////////////////////////////////////////////////////////////
+
+			app.factory('inputRouter', function(){
+				var InputRouter = function(){
+					this.routes = [];
+				}
+
+				InputRouter.prototype.handle = function(input, directory, cache, scope){
+					var
+						resultList = [], 
+						matches = null;
+
+					// find and call appropriate route for passed input 
+					for(var i = 0; i < this.routes.length; i++){
+						var route = this.routes[i];
+						if(matches = input.match(route.rule)){
+							resultList = route.handler.call(null, input, directory, cache, matches, scope);
+							break;
+						}
+					}
+
+					return resultList;
+				}
+
+				InputRouter.prototype.register = function(regex, handler){
+					this.routes.push({rule: regex, handler: handler});
+				};
+
+				return new InputRouter();
+			});
+
+			////////////////////////////////////////////////////////////////////////////////////
+			//// FEATURES
+			////////////////////////////////////////////////////////////////////////////////////
+
+			app.provider('features', function(){
+				var featurelist = {};
+
+				this.registerFeature = function(feature_name, feature){
+					featurelist[feature_name] = {
+						name: feature_name, 
+						action: function(){ feature.process.apply(feature, [].slice.call(arguments)) },
+					};
+				};
+
+				this.$get = function(){
+
+					var features = function(featurelist){
+						this.featurelist = featurelist;
+					};
+
+					features.prototype.getAllForPath = function(path){
+						return this.featurelist;
+					};
+
+					features.prototype.hasFeature = function(feature_name){
+						return this.featurelist[feature_name] !== undefined;
+					}
+
+					return new features(featurelist);
+				}
+			});
+
+			////////////////////////////////////////////////////////////////////////////////////
 			//// CONTEXT MENU
 			////////////////////////////////////////////////////////////////////////////////////
 
-			app.factory('contextMenuOpenShell', function(){
-				var platform;
-
-				function openInShell(directory){
-					var cmd;
-
-					// escape directory
-					directory = directory.replace(/(["\s'$`\\])/g,'\\$1');
-
-					if (platform === 'win32' || platform === 'win64') { // WIN
-						cmd = "START cmd.exe /k cd "+directory;
-					} else if (platform === 'darwin') { // OSX
-						cmd = "open -a Terminal "+directory;
-					} else if (platform === 'linux') { // LINUX
-						cmd = "xterm -e 'cd "+directory+"'";
-					}
-
-					console.log(cmd);
-
-					// invoke cmd
-					node_child_process.exec(cmd);
-				}
-
-				return function(fullpath){
-					var nodeInfo;
-					try{
-						nodeInfo = node_fs.lstatSync(fullpath); // some files are not accessible since they are provided by the underlaying OS
-					}catch(err){
-						console.error(err);
-						return;
-					}
-
-					// we only want to open directories in a shell
-					if(!nodeInfo.isDirectory()){
-						console.info('You can not open other than directories in a shell');
-						return;
-					}
-
-					var supported_os = ['win32', 'win64', 'darwin', 'linux'];
-
-					platform = node_os.platform();
-
-					if(supported_os.indexOf(platform) === -1){
-						console.error('contextMenuOpenShell does not support platform '+platform);
-						return;
-					}
-
-					return { name: 'Open in shell', action: openInShell};
-				}
-			});
-
-			app.factory('contextMenuModel', function(contextMenuOpenShell){
-				return function(path){
-					return [contextMenuOpenShell(path)];
-				}
-			});
-
 			app.directive('contextMenu', ()=>{
 				return {
-					controller: function($scope, $element, contextMenuModel){
+					controller: function($scope, $element, features){
 						var path_current = null;
 						/**
 						 * Provides the menu to the view
@@ -158,10 +167,11 @@
 						 */
 						$scope.showMenu = function(path){
 							path_current = path;
-							var menu = contextMenuModel(path);
+							var menu = features.getAllForPath(path);
+
 							if(menu.length === 0) return;
 
-							$scope.menu = contextMenuModel(path);
+							$scope.menu = menu;
 							// TODO: set focus and handle tab on your own in order to not focus elements behind the context menu
 						}
 
@@ -170,7 +180,7 @@
 						}
 
 						$scope.perform  = function(action){
-							action.call(null, path_current);
+							action(path_current);
 							$scope.closeMenu();
 						}
 					},
@@ -186,7 +196,18 @@
 									scope.$apply();
 								}
 							}
-						})
+						});
+
+						document.addEventListener('contextmenu', function(e) {
+							if(e.target.classList.contains('finderview__item--isDirectory')) {
+								e.preventDefault();
+								var path = e.target.title;
+								scope.showMenu(path);
+								scope.$apply();
+							}
+
+							return false;
+						});
 					}
 				}
 			});
@@ -195,7 +216,7 @@
 			//// FINDER VIEW
 			////////////////////////////////////////////////////////////////////////////////////
 
-			app.directive('finderView', [()=>{
+			app.directive('finderView', ['inputRouter', (inputRouter)=>{
 
 				/**
 				 * Those styles get appended to the head only once
@@ -234,7 +255,7 @@
 						</div>
 						<ul>
 							<li><a href="#" ng-click="openParentDir()">..</a></li>
-							<li ng-repeat="(i, node) in (filteredResults = (viewResultList | filterResults:querystring))">
+							<li ng-repeat="(i, node) in viewResultList">
 								<a href="#" data-i="{{i}}" ng-click="open(node)" title="{{node}}" ng-class="{'finderview__item--isFile' : cache[node].isFile(), 'finderview__item--isDirectory' : cache[node].isDirectory(), 'finderview__item--isSymbolicLink' :cache[node].isSymbolicLink()}">
 									<i class="fa fa-folder-o" ng-If="cache[node].isDirectory()"></i>
 									{{basename(node)}}
@@ -243,7 +264,7 @@
 							</li>
 						</ul>
 						<div style="color: #555; font-size: 12rem; box-shadow: 0 0 3px rgba(0, 0, 0, 0.2); padding: 9rem">
-							Matches: {{(viewResultList | filter:querystring).length}}
+							Matches: {{viewResultList.length}}
 						</div>`;
 
 				return {
@@ -253,6 +274,7 @@
 					//replace: true,
 					template: template,
 					controller: function($scope, $element){
+
 						var
 							directory = [], // contains a list of fullpaths for the directory recently read
 							$input = $element[0].querySelector('[ng-model="querystring"]'); // userinput-field for the querystring we utilize to filter the output
@@ -261,24 +283,36 @@
 						$scope.viewResultList = []; // the list of results presented in the view
 						$scope.directory_path = null; // the current directory path of the directory at hand
 
-						$scope.$watch('querystring', onQuerystringChange); // kommt noch in die link-methode
+						//document.addEventListener('app/path_change', function(e){
+
+						/*
+						 * @deprecated
+						 */
+						document.addEventListener('app/path_change', function(e){
+							var path = e.detail.path;
+
+							try {
+								node_fs.accessSync(path, node_fs.F_OK); //get to know whether a directory exists or not
+								$scope.open(path)
+							} catch (e) {
+								console.error(path + ' does not exist', e)
+							}
+						});
 
 						// initially present recent directory OR rootdir
 						_readDir(_storage('directory_path') || node_path.resolve(DS), (path)=>{
 							document.title = path;
 							_updateResult(directory);
-							_resetQueryString();
+							$scope.resetQueryString();
 						});
 
-						// NOT YET IN USE
-						function onQuerystringChange(new_value){
-							if(!new_value) return;
+						$scope.onQuerystringChange = function(new_value, old_value){
+							if(new_value === old_value) return;
 
-							if(new_value[0] === '?'){
-								$scope.viewResultList = cache;
-							}else{
-								$scope.viewResultList = directory;
-							}
+							var resultList = inputRouter.handle(new_value, directory, $scope.cache, $scope);
+							if(resultList !== null){
+								$scope.viewResultList = resultList;
+							}	
 						}
 
 						/**
@@ -320,7 +354,7 @@
 						}
 
 						////////////////////////////////////////////////////////////////////////////////////
-						//// VIEWS RESULT-LIST
+						//// #VIEWS RESULT-LIST
 						////////////////////////////////////////////////////////////////////////////////////
 
 						function _updateResult(resultList){
@@ -329,15 +363,9 @@
 						}
 
 						/**
-						 * Sort either by name or type - how can we do both at the same time?
+						 * Sort by name and type (dir|file)
 						 */
 						function _sortResultList(resultList){
-
-							/*
-							resultList = resultList.sort(function (a, b) {
-								return a.toLowerCase().localeCompare(b.toLowerCase());
-							});
-							/*/
 							resultList = resultList.sort(function(a, b){
 								var
 									a_sort = (cache[a].isDirectory() ? 'DIR' : 'FILE') + a,
@@ -349,18 +377,19 @@
 								return comparison;
 
 							});
-							//*/
 
 							return resultList;
 						}
 
 						////////////////////////////////////////////////////////////////////////////////////
-						//// QUERY-INPUT FIELD
+						//// #QUERY-INPUT FIELD
 						////////////////////////////////////////////////////////////////////////////////////
 
-						function _resetQueryString(){
+						/**
+						 * Clears the Searchstring 
+						 */
+						$scope.resetQueryString = function(){
 							$scope.querystring = "";
-							$scope.$apply();
 						}
 
 						/**
@@ -375,19 +404,21 @@
 						}
 
 						////////////////////////////////////////////////////////////////////////////////////
-						//// USER NAVIGATION ACTIONS
+						//// #USER NAVIGATION ACTIONS
 						////////////////////////////////////////////////////////////////////////////////////
 
 						/**
 						 *
 						 */
 						$scope.open = function( path ){
-							var node_info = _cacheGet(path);
+							var node_info = _cacheGet(path) || _getNodeFromFilesystem(path); // when path is not found in cache the requested path is most likely another harddrive
+
 							if(node_info.isDirectory()){
 								_readDir(node_info.custom_path, (path)=>{
 									document.title = path;
 									_updateResult(directory);
-									_resetQueryString();
+									$scope.resetQueryString();
+									$scope.$apply();
 								});
 							}else if(node_info.isFile()){
 								const child = node_child_process.exec(path, (error, stdout, stderr) => {
@@ -413,10 +444,8 @@
 						}
 
 						$scope.submitSearch = function(){
-							console.log('SUBMIT')
-
-							if(!$scope.filteredResults.length) return;
-							$scope.open($scope.filteredResults[0]);
+							if(!$scope.viewResultList.length) return;
+							$scope.open($scope.viewResultList[0]);
 						}
 
 						$scope.focusNextNode = function(){
@@ -455,7 +484,7 @@
 							_readDir(path, (path)=>{
 								document.title = path;
 								_updateResult(directory);
-								_resetQueryString();
+								$scope.resetQueryString();
 							});
 
 							$scope.focusInput();
@@ -473,7 +502,6 @@
 
 							node_fs.readdir($scope.directory_path, (err, data) => {
 								if (err){
-
 									console.error(path, err);
 									return;
 								};
@@ -495,9 +523,6 @@
 										return false;
 									}
 
-									// if(fullpath === 'C:\\Users\\All Users'){
-									// 	console.log(nodeInfo, nodeInfo.isDirectory())
-									// }
 									_cacheSet(fullpath, nodeInfo);
 
 									return true;
@@ -550,7 +575,7 @@
 						element[0].addEventListener('keydown', function(e){
 							if(e.keyCode === 16) return; // shiftleft + shiftright
 							if(e.code === 'Tab') return; // Tab is used natively
-							if(e.code === 'Enter') return; // prevent form from being submitted (To be honest, I dont relly know why the form should get submitted but it does so when we not return here..)
+							if(e.code === 'Enter') return; // prevent form from being submitted (To be honest, I dont relly know why the form should get submitted but it does so when we do not return here..)
 
 							if(e.keyCode === 38){ // up
 								e.preventDefault(); // prevent from triggering scrolling the scrollbar
@@ -563,10 +588,11 @@
 							}else if(e.keyCode === 37){ // right
 								scope.openParentDir();
 							}else if(e.which !== 0 && !e.ctrlKey && !e.metaKey && !e.altKey){ // handle all printable characters
-								console.log('RECEIVING input', e)
 								scope.focusInput();
 							}
 						});
+
+						scope.$watch('querystring', scope.onQuerystringChange);
 
 						// insert CSS only once
 						if(document.querySelector('#finderViewStyles') === null){
@@ -576,22 +602,62 @@
 				};
 			}]);
 
-			app.filter('filterResults', function() {
-				return function(items, querystring) {
+			////////////////////////////////////////////////////////////////////////////////////
+			//// APP
+			////////////////////////////////////////////////////////////////////////////////////
+
+			app.controller('AppCtrl', function ($scope, $element, inputRouter, features) {
+
+				/*
+				 * register all routes
+				 */
+
+				// action routes
+				inputRouter.register(/^:(.*)$/, function(searchstring, directory, cache, matches, scope){	
+					var cmd = matches[1];
+
+					if(features.featurelist[cmd] !== undefined){ // TODO: CMD will never be found cause it is not the featurename
+						features.featurelist[cmd].action(scope.directory_path);
+						scope.resetQueryString();
+					}
+					return null; 
+				});
+
+				// change volume >d: | >c:
+				inputRouter.register(/^>(.*)$/, function(searchstring, directory, cache, matches){	
+					var event_set_path = new CustomEvent('app/path_change', {detail: {path: matches[1]}});
+					document.dispatchEvent(event_set_path);
+					return null;
+				});
+
+				// Search in cache
+				inputRouter.register(/^\?(.*)$/, function(searchstring, directory, cache, matches){
+					searchstring = matches[1];
 					var filtered = [];
 
-					for (var i = 0; i < items.length; i++) {
-						var item = items[i];
-						if (new RegExp('^.*'+querystring+'[^\\\\]*$', 'i').test(item)) {
+					for(var path in cache){
+						if (new RegExp('^.*'+searchstring+'[^\\\\]*$', 'i').test(path)) {
+							filtered.push(path);
+						}
+					}
+
+					return filtered; 
+				});
+
+				// Simple list filter that reduces the shown resultlist to items matching the searchstring entered by the user
+				inputRouter.register(/^.*$/, function(searchstring, directory, cache, matches){	
+					var filtered = [];
+
+					for (var i = 0; i < directory.length; i++) {
+						var item = directory[i];
+						if (new RegExp('^.*'+searchstring+'[^\\\\]*$', 'i').test(item)) {
 							filtered.push(item);
 						}
 					}
 
-					return filtered;
-				};
-			});
+					return filtered; 
+				});
 
-			app.controller('AppCtrl', function ($scope, $element) {
 				// handle ctrl+1, ctrl+2, ctrl+3, ctrl+4 to update amount of finderViewInsatnces
 				var gridKeys = [1,2,3,4];
 				$element[0].addEventListener('keydown', function(e){
@@ -619,6 +685,83 @@
 				// show last amount of finderInstances
 				showNumberFinderViews(localStorage.getItem('AppCtrl_numberFinderInstances') || 1);
 			});
+
+			class AbstractFeature {
+				constructor(){
+					if (new.target === AbstractFeature) {
+						throw new TypeError("Cannot construct Abstract instances directly");
+					}
+
+					if (typeof this.canProcess !== 'function') {
+						throw new TypeError("Must override method 'canProcess'");
+					}
+
+					if (typeof this.process !== 'function') {
+						throw new TypeError("Must override method 'process'");
+					}
+				}
+			}
+
+			class FeatureOpenInShell extends AbstractFeature {
+				constructor(fullpath){
+					super();
+				}
+				canProcess(fullpath){
+					var nodeInfo;
+					try{
+						nodeInfo = node_fs.lstatSync(fullpath); // some files are not accessible since they are provided by the underlaying OS
+					}catch(err){
+						console.error(err, fullpath);
+						return false;
+					}
+
+					// we only want to open directories in a shell
+					if(!nodeInfo.isDirectory()){
+						console.info('You can not open other than directories in a shell');
+						return false;
+					}
+
+					var supported_os = ['win32', 'win64', 'darwin', 'linux'];
+
+					var platform = node_os.platform();
+
+					if(supported_os.indexOf(platform) === -1){
+						console.error('featureOpenInShell does not support platform '+platform);
+						return false;
+					}
+
+					// since we know we will be able to perform the action we can set the path now
+					this.directory = fullpath;
+					return true;
+				}
+				process(fullpath){
+					this.openInShell(fullpath);
+				}
+				openInShell(fullpath){
+					if(!this.canProcess(fullpath)) return;
+
+					var cmd, directory = this.directory, platform = node_os.platform();;
+
+					// escape directory
+					directory = directory.replace(/(["\s'$`\\])/g,'\\$1');
+
+					if (platform === 'win32' || platform === 'win64') { // WIN
+						cmd = "START cmd.exe /k cd "+directory;
+					} else if (platform === 'darwin') { // OSX
+						cmd = "open -a Terminal "+directory;
+					} else if (platform === 'linux') { // LINUX
+						cmd = "xterm -e 'cd "+directory+"'";
+					}
+
+					// invoke cmd
+					node_child_process.exec(cmd);
+				}
+			}
+
+			angular.module('app').config(['featuresProvider', function(featuresProvider) {
+			  featuresProvider.registerFeature("shell", new FeatureOpenInShell, 'shell');
+			}]);
+			
 		</script>
 	</body>
 </html>
