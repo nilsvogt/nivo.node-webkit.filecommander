@@ -80,6 +80,7 @@
 			const node_os = require('os');
 			const node_fs = require('fs');
 			const node_path = require('path');
+			const nw_gui = require('nw.gui');
 			const DS = node_path.sep;
 			const node_child_process = require('child_process');
 
@@ -98,10 +99,10 @@
 
 				InputRouter.prototype.handle = function(input, directory, cache, scope){
 					var
-						resultList = [], 
+						resultList = [],
 						matches = null;
 
-					// find and call appropriate route for passed input 
+					// find and call appropriate route for passed input
 					for(var i = 0; i < this.routes.length; i++){
 						var route = this.routes[i];
 						if(matches = input.match(route.rule)){
@@ -129,7 +130,7 @@
 
 				this.registerFeature = function(feature_name, feature){
 					featurelist[feature_name] = {
-						name: feature_name, 
+						name: feature_name,
 						action: function(){ feature.process.apply(feature, [].slice.call(arguments)) },
 					};
 				};
@@ -166,6 +167,7 @@
 						 * @return void
 						 */
 						$scope.showMenu = function(path){
+							console.log('show menu')
 							path_current = path;
 							var menu = features.getAllForPath(path);
 
@@ -190,7 +192,7 @@
 								e.preventDefault();
 
 								var target = document.activeElement;
-								if(target.classList.contains('finderview__item--isDirectory')){
+								if(target.classList.contains('finderview__item')){
 									var path = target.title;
 									scope.showMenu(path);
 									scope.$apply();
@@ -199,7 +201,7 @@
 						});
 
 						document.addEventListener('contextmenu', function(e) {
-							if(e.target.classList.contains('finderview__item--isDirectory')) {
+							if(e.target.classList.contains('finderview__item')) {
 								e.preventDefault();
 								var path = e.target.title;
 								scope.showMenu(path);
@@ -256,7 +258,7 @@
 						<ul>
 							<li><a href="#" ng-click="openParentDir()">..</a></li>
 							<li ng-repeat="(i, node) in viewResultList">
-								<a href="#" data-i="{{i}}" ng-click="open(node)" title="{{node}}" ng-class="{'finderview__item--isFile' : cache[node].isFile(), 'finderview__item--isDirectory' : cache[node].isDirectory(), 'finderview__item--isSymbolicLink' :cache[node].isSymbolicLink()}">
+								<a href="#" data-i="{{i}}" ng-click="open(node)" title="{{node}}" class="finderview__item" ng-class="{'finderview__item--isFile' : cache[node].isFile(), 'finderview__item--isDirectory' : cache[node].isDirectory(), 'finderview__item--isSymbolicLink' :cache[node].isSymbolicLink()}">
 									<i class="fa fa-folder-o" ng-If="cache[node].isDirectory()"></i>
 									{{basename(node)}}
 									<span ng-If="node !== cache[node].custom_realPath" style="font-size: 0.7em; ">({{cache[node].custom_realPath}})</span>
@@ -312,7 +314,7 @@
 							var resultList = inputRouter.handle(new_value, directory, $scope.cache, $scope);
 							if(resultList !== null){
 								$scope.viewResultList = resultList;
-							}	
+							}
 						}
 
 						/**
@@ -386,7 +388,7 @@
 						////////////////////////////////////////////////////////////////////////////////////
 
 						/**
-						 * Clears the Searchstring 
+						 * Clears the Searchstring
 						 */
 						$scope.resetQueryString = function(){
 							$scope.querystring = "";
@@ -421,11 +423,14 @@
 									$scope.$apply();
 								});
 							}else if(node_info.isFile()){
-								const child = node_child_process.exec(path, (error, stdout, stderr) => {
-									if (error) {
-										throw error;
-									}
-								});
+								nw_gui.Shell.openItem(path);
+
+								// var child = node_child_process.exec(path, (error, stdout, stderr) => {
+								// 	if (error) {
+								// 		console.log('--', stdout, stderr)
+								// 		throw error;
+								// 	}
+								// });
 							}
 
 							$scope.focusInput();
@@ -613,18 +618,18 @@
 				 */
 
 				// action routes
-				inputRouter.register(/^:(.*)$/, function(searchstring, directory, cache, matches, scope){	
+				inputRouter.register(/^:(.*)$/, function(searchstring, directory, cache, matches, scope){
 					var cmd = matches[1];
 
 					if(features.featurelist[cmd] !== undefined){ // TODO: CMD will never be found cause it is not the featurename
 						features.featurelist[cmd].action(scope.directory_path);
 						scope.resetQueryString();
 					}
-					return null; 
+					return null;
 				});
 
 				// change volume >d: | >c:
-				inputRouter.register(/^>(.*)$/, function(searchstring, directory, cache, matches){	
+				inputRouter.register(/^>(.*)$/, function(searchstring, directory, cache, matches){
 					var event_set_path = new CustomEvent('app/path_change', {detail: {path: matches[1]}});
 					document.dispatchEvent(event_set_path);
 					return null;
@@ -641,11 +646,11 @@
 						}
 					}
 
-					return filtered; 
+					return filtered;
 				});
 
 				// Simple list filter that reduces the shown resultlist to items matching the searchstring entered by the user
-				inputRouter.register(/^.*$/, function(searchstring, directory, cache, matches){	
+				inputRouter.register(/^.*$/, function(searchstring, directory, cache, matches){
 					var filtered = [];
 
 					for (var i = 0; i < directory.length; i++) {
@@ -655,7 +660,7 @@
 						}
 					}
 
-					return filtered; 
+					return filtered;
 				});
 
 				// handle ctrl+1, ctrl+2, ctrl+3, ctrl+4 to update amount of finderViewInsatnces
@@ -758,10 +763,26 @@
 				}
 			}
 
+			class FeatureOpenInFolder extends AbstractFeature {
+				constructor(fullpath){
+					super();
+				}
+				canProcess(fullpath){
+					return true;
+				}
+				process(fullpath){
+					this.openInFolder(fullpath);
+				}
+				openInFolder(fullpath){
+					nw_gui.Shell.showItemInFolder(fullpath);
+				}
+			}
+
 			angular.module('app').config(['featuresProvider', function(featuresProvider) {
-			  featuresProvider.registerFeature("shell", new FeatureOpenInShell, 'shell');
+				featuresProvider.registerFeature("shell", new FeatureOpenInShell, 'shell');
+				featuresProvider.registerFeature("folder", new FeatureOpenInFolder, 'folder');
 			}]);
-			
+
 		</script>
 	</body>
 </html>
