@@ -79,50 +79,17 @@
 		<script> "use strict";
 			const node_os = require('os');
 			const node_fs = require('fs');
-			const node_path = require('path');
 			const nw_gui = require('nw.gui');
-			const DS = node_path.sep;
 			const node_child_process = require('child_process');
-
 			var cache = {};
 
 			var app = angular.module('app', []);
 
-			////////////////////////////////////////////////////////////////////////////////////
-			//// INPUT ROUTER
-			////////////////////////////////////////////////////////////////////////////////////
+			app.value('node_path', require('path'));
 
-			app.factory('inputRouter', function(){
-				var InputRouter = function(){
-					this.routes = [];
-				}
-
-				InputRouter.prototype.handle = function(input, directory, cache, scope){
-					var
-						resultList = [],
-						matches = null;
-
-					// find and call appropriate route for passed input
-					for(var i = 0; i < this.routes.length; i++){
-						var route = this.routes[i];
-						if(matches = input.match(route.rule)){
-							resultList = route.handler.call(null, input, directory, cache, matches, scope);
-							break;
-						}
-					}
-
-					return resultList;
-				}
-
-				InputRouter.prototype.register = function(regex, handler){
-					this.routes.push({rule: regex, handler: handler});
-				};
-
-				return new InputRouter();
-			});
 
 			////////////////////////////////////////////////////////////////////////////////////
-			//// FEATURES
+			//// #FEATURE HANDLER
 			////////////////////////////////////////////////////////////////////////////////////
 
 			app.provider('features', function(){
@@ -137,24 +104,65 @@
 
 				this.$get = function(){
 
-					var features = function(featurelist){
+					var Features = function(featurelist){
 						this.featurelist = featurelist;
 					};
 
-					features.prototype.getAllForPath = function(path){
+					Features.prototype.getAllForPath = function(path){
 						return this.featurelist;
 					};
 
-					features.prototype.hasFeature = function(feature_name){
+					Features.prototype.hasFeature = function(feature_name){
 						return this.featurelist[feature_name] !== undefined;
 					}
 
-					return new features(featurelist);
+					return new Features(featurelist);
 				}
 			});
 
 			////////////////////////////////////////////////////////////////////////////////////
-			//// CONTEXT MENU
+			//// #INPUT ROUTER
+			////////////////////////////////////////////////////////////////////////////////////
+
+			app.provider('inputRouter', function(){
+				var routes = [];
+
+				this.register = function(regex, handler){
+					routes.push({rule: regex, handler: handler});
+				}
+
+				this.$get = ['features', function(features){
+					var InputRouter = function(routes){
+						this.routes = routes || [];
+					}
+
+					InputRouter.prototype.handle = function(input, directory, cache, scope){
+						var
+							resultList = [],
+							matches = null;
+
+						// find and call appropriate route for passed input
+						for(var i = 0; i < this.routes.length; i++){
+							var route = this.routes[i];
+							if(matches = input.match(route.rule)){
+								resultList = route.handler.call(null, input, directory, cache, matches, scope, features);
+								break;
+							}
+						}
+
+						return resultList;
+					}
+
+					InputRouter.prototype.register = function(regex, handler){
+						this.routes.push({rule: regex, handler: handler});
+					};
+
+					return new InputRouter(routes);
+				}]
+			});
+
+			////////////////////////////////////////////////////////////////////////////////////
+			//// #CONTEXT MENU
 			////////////////////////////////////////////////////////////////////////////////////
 
 			app.directive('contextMenu', ()=>{
@@ -215,7 +223,7 @@
 			});
 
 			////////////////////////////////////////////////////////////////////////////////////
-			//// FINDER VIEW
+			//// #FINDER VIEW
 			////////////////////////////////////////////////////////////////////////////////////
 
 			app.directive('finderView', ['inputRouter', (inputRouter)=>{
@@ -226,11 +234,12 @@
 				var styles = `
 					<style id="finderViewStyles">
 						.finderview { height: 100%; flex-grow: 1; width: 0; overflow: hidden;}
-						.finderview > ul { height: calc(100% - 65rem - 30rem); overflow-y: scroll; hidden; padding: 10rem 0; border-left: 1px dashed #ccc; }
+						.finderview > ul { height: calc(100% - 65rem - 30rem); overflow-y: auto; hidden; padding: 10rem 0; border-left: 1px dashed #ccc; }
 						.finderview > ul li { white-space: nowrap; text-overflow: ellipsis; width: 100%; overflow: hidden; }
 						.finderview > ul li a { display: block; padding: 0 0 0 0; }
+						.finderview > ul li:nth-child(even) a {background: #e6e6e6}
 						.finderview > ul li a:hover { background: rgba(0,0,0,0.1); }
-						.finderview > ul li a:focus { background: rgba(0,0,0,0.2); }
+						.finderview > ul li a:focus { background: #EB5424; color: #fff; }
 						.finderview > ul li a:before { content: attr(data-i); display: inline-block; font-size: 16rem; width: 2em; color: #999; bac_kground: #F0F2F1; text-align: right; }
 
 						.finderview > div:first-child { position: relative; overflow: hidden; height: 65rem; }
@@ -275,7 +284,7 @@
 							},
 					//replace: true,
 					template: template,
-					controller: function($scope, $element){
+					controller: function($scope, $element, node_path){
 
 						var
 							directory = [], // contains a list of fullpaths for the directory recently read
@@ -302,7 +311,7 @@
 						});
 
 						// initially present recent directory OR rootdir
-						_readDir(_storage('directory_path') || node_path.resolve(DS), (path)=>{
+						_readDir(_storage('directory_path') || node_path.resolve(node_path.sep), (path)=>{
 							document.title = path;
 							_updateResult(directory);
 							$scope.resetQueryString();
@@ -424,13 +433,6 @@
 								});
 							}else if(node_info.isFile()){
 								nw_gui.Shell.openItem(path);
-
-								// var child = node_child_process.exec(path, (error, stdout, stderr) => {
-								// 	if (error) {
-								// 		console.log('--', stdout, stderr)
-								// 		throw error;
-								// 	}
-								// });
 							}
 
 							$scope.focusInput();
@@ -482,7 +484,7 @@
 						 * Open parent directory of current directory
 						 */
 						$scope.openParentDir = function(){
-							var isRootDir = $scope.directory_path === DS;
+							var isRootDir = $scope.directory_path === node_path.sep;
 							if(isRootDir) return;
 
 							var path = node_path.resolve($scope.directory_path, '../');
@@ -512,8 +514,6 @@
 								};
 
 								_storage('directory_path', path); // remember last directorypath to get there on restart
-
-
 
 								// create list of all nodes in the directory
 								directory = [];
@@ -608,60 +608,10 @@
 			}]);
 
 			////////////////////////////////////////////////////////////////////////////////////
-			//// APP
+			//// #APP
 			////////////////////////////////////////////////////////////////////////////////////
 
-			app.controller('AppCtrl', function ($scope, $element, inputRouter, features) {
-
-				/*
-				 * register all routes
-				 */
-
-				// action routes
-				inputRouter.register(/^:(.*)$/, function(searchstring, directory, cache, matches, scope){
-					var cmd = matches[1];
-
-					if(features.featurelist[cmd] !== undefined){ // TODO: CMD will never be found cause it is not the featurename
-						features.featurelist[cmd].action(scope.directory_path);
-						scope.resetQueryString();
-					}
-					return null;
-				});
-
-				// change volume >d: | >c:
-				inputRouter.register(/^>(.*)$/, function(searchstring, directory, cache, matches){
-					var event_set_path = new CustomEvent('app/path_change', {detail: {path: matches[1]}});
-					document.dispatchEvent(event_set_path);
-					return null;
-				});
-
-				// Search in cache
-				inputRouter.register(/^\?(.*)$/, function(searchstring, directory, cache, matches){
-					searchstring = matches[1];
-					var filtered = [];
-
-					for(var path in cache){
-						if (new RegExp('^.*'+searchstring+'[^\\\\]*$', 'i').test(path)) {
-							filtered.push(path);
-						}
-					}
-
-					return filtered;
-				});
-
-				// Simple list filter that reduces the shown resultlist to items matching the searchstring entered by the user
-				inputRouter.register(/^.*$/, function(searchstring, directory, cache, matches){
-					var filtered = [];
-
-					for (var i = 0; i < directory.length; i++) {
-						var item = directory[i];
-						if (new RegExp('^.*'+searchstring+'[^\\\\]*$', 'i').test(item)) {
-							filtered.push(item);
-						}
-					}
-
-					return filtered;
-				});
+			app.controller('AppCtrl', function ($scope, $element) {
 
 				// handle ctrl+1, ctrl+2, ctrl+3, ctrl+4 to update amount of finderViewInsatnces
 				var gridKeys = [1,2,3,4];
@@ -691,6 +641,10 @@
 				showNumberFinderViews(localStorage.getItem('AppCtrl_numberFinderInstances') || 1);
 			});
 
+			////////////////////////////////////////////////////////////////////////////////////
+			//// #FEATURES
+			////////////////////////////////////////////////////////////////////////////////////
+
 			class AbstractFeature {
 				constructor(){
 					if (new.target === AbstractFeature) {
@@ -706,83 +660,155 @@
 					}
 				}
 			}
+			
+			var featurelist = [];
 
-			class FeatureOpenInShell extends AbstractFeature {
-				constructor(fullpath){
-					super();
+			/*
+			 * Feature: OpenInShell
+			 */
+			(function(featurelist){
+				class FeatureOpenInShell extends AbstractFeature {
+					constructor(fullpath){
+						super();
+					}
+					canProcess(fullpath){
+						var nodeInfo;
+						try{
+							nodeInfo = node_fs.lstatSync(fullpath); // some files are not accessible since they are provided by the underlaying OS
+						}catch(err){
+							console.error(err, fullpath);
+							return false;
+						}
+
+						// we only want to open directories in a shell
+						if(!nodeInfo.isDirectory()){
+							console.info('You can not open other than directories in a shell');
+							return false;
+						}
+
+						var supported_os = ['win32', 'win64', 'darwin', 'linux'];
+
+						var platform = node_os.platform();
+
+						if(supported_os.indexOf(platform) === -1){
+							console.error('featureOpenInShell does not support platform '+platform);
+							return false;
+						}
+
+						// since we know we will be able to perform the action we can set the path now
+						this.directory = fullpath;
+						return true;
+					}
+					process(fullpath){
+						this.openInShell(fullpath);
+					}
+					openInShell(fullpath){
+						if(!this.canProcess(fullpath)) return;
+
+						var cmd, directory = this.directory, platform = node_os.platform();;
+
+						// escape directory
+						directory = directory.replace(/(["\s'$`\\])/g,'\\$1');
+
+						if (platform === 'win32' || platform === 'win64') { // WIN
+							cmd = "START cmd.exe /k cd "+directory;
+						} else if (platform === 'darwin') { // OSX
+							cmd = "open -a Terminal "+directory;
+						} else if (platform === 'linux') { // LINUX
+							cmd = "xterm -e 'cd "+directory+"'";
+						}
+
+						// invoke cmd
+						node_child_process.exec(cmd);
+					}
+				};
+
+				featurelist.push({cmd: 'shell', instance: new FeatureOpenInShell()});
+			}(featurelist));
+			
+			/*
+			 * Feature: OpenInFolder
+			 */
+			(function(featurelist){
+				class FeatureOpenInFolder extends AbstractFeature {
+					constructor(fullpath){
+						super();
+					}
+					canProcess(fullpath){
+						return true;
+					}
+					process(fullpath){
+						this.openInFolder(fullpath);
+					}
+					openInFolder(fullpath){
+						nw_gui.Shell.showItemInFolder(fullpath);
+					}
 				}
-				canProcess(fullpath){
-					var nodeInfo;
-					try{
-						nodeInfo = node_fs.lstatSync(fullpath); // some files are not accessible since they are provided by the underlaying OS
-					}catch(err){
-						console.error(err, fullpath);
-						return false;
+
+				featurelist.push({cmd: 'folder', instance: new FeatureOpenInFolder()});
+			}(featurelist));
+
+			////////////////////////////////////////////////////////////////////////////////////
+			//// #CONFIG
+			////////////////////////////////////////////////////////////////////////////////////
+			angular.module('app').config(['featuresProvider', 'inputRouterProvider', function(featuresProvider, inputRouterProvider) {
+
+				for(var i = 0; i < featurelist.length; i++){
+					var feature = featurelist[i];
+					featuresProvider.registerFeature(feature.cmd, feature.instance);
+				}
+
+				/*
+				 * register all routes
+				 */
+
+				// action routes
+				inputRouterProvider.register(/^:(.*)$/, function(searchstring, directory, cache, matches, scope, features){
+					var cmd = matches[1];
+
+					if(features.featurelist[cmd] !== undefined){ // TODO: CMD will never be found cause it is not the featurename
+						features.featurelist[cmd].action(scope.directory_path);
+						scope.resetQueryString();
+					}
+					return null;
+				});
+
+				// change volume >d: | >c:
+				inputRouterProvider.register(/^>(.*)$/, function(searchstring, directory, cache, matches, scope){
+					var event_set_path = new CustomEvent('app/path_change', {detail: {path: matches[1]}});
+					document.dispatchEvent(event_set_path);
+					return null;
+				});
+
+				// Search in cache
+				inputRouterProvider.register(/^\?(.*)$/, function(searchstring, directory, cache, matches){
+					searchstring = matches[1];
+					var filtered = [];
+
+					for(var path in cache){
+						if (new RegExp('^.*'+searchstring+'[^\\\\]*$', 'i').test(path)) {
+							filtered.push(path);
+						}
 					}
 
-					// we only want to open directories in a shell
-					if(!nodeInfo.isDirectory()){
-						console.info('You can not open other than directories in a shell');
-						return false;
+					return filtered;
+				});
+
+				// Simple list filter that reduces the shown resultlist to items matching the searchstring entered by the user
+				inputRouterProvider.register(/^.*$/, function(searchstring, directory, cache, matches){
+					var filtered = [];
+
+					for (var i = 0; i < directory.length; i++) {
+						var item = directory[i];
+						if (new RegExp('^.*'+searchstring+'[^\\\\]*$', 'i').test(item)) {
+							filtered.push(item);
+						}
 					}
 
-					var supported_os = ['win32', 'win64', 'darwin', 'linux'];
-
-					var platform = node_os.platform();
-
-					if(supported_os.indexOf(platform) === -1){
-						console.error('featureOpenInShell does not support platform '+platform);
-						return false;
-					}
-
-					// since we know we will be able to perform the action we can set the path now
-					this.directory = fullpath;
-					return true;
-				}
-				process(fullpath){
-					this.openInShell(fullpath);
-				}
-				openInShell(fullpath){
-					if(!this.canProcess(fullpath)) return;
-
-					var cmd, directory = this.directory, platform = node_os.platform();;
-
-					// escape directory
-					directory = directory.replace(/(["\s'$`\\])/g,'\\$1');
-
-					if (platform === 'win32' || platform === 'win64') { // WIN
-						cmd = "START cmd.exe /k cd "+directory;
-					} else if (platform === 'darwin') { // OSX
-						cmd = "open -a Terminal "+directory;
-					} else if (platform === 'linux') { // LINUX
-						cmd = "xterm -e 'cd "+directory+"'";
-					}
-
-					// invoke cmd
-					node_child_process.exec(cmd);
-				}
-			}
-
-			class FeatureOpenInFolder extends AbstractFeature {
-				constructor(fullpath){
-					super();
-				}
-				canProcess(fullpath){
-					return true;
-				}
-				process(fullpath){
-					this.openInFolder(fullpath);
-				}
-				openInFolder(fullpath){
-					nw_gui.Shell.showItemInFolder(fullpath);
-				}
-			}
-
-			angular.module('app').config(['featuresProvider', function(featuresProvider) {
-				featuresProvider.registerFeature("shell", new FeatureOpenInShell, 'shell');
-				featuresProvider.registerFeature("folder", new FeatureOpenInFolder, 'folder');
+					return filtered;
+				});
 			}]);
-
+			
 		</script>
 	</body>
 </html>
