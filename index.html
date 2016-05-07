@@ -9,6 +9,8 @@
 
 	In Progress:
 	- Context menu
+		- Make context menu an instance of finderview 
+			- implement datasource and delegate for the finderview in order to make it more reusable
 
 	Done:
 	- InputRouter
@@ -34,6 +36,7 @@
 				box-sizing: border-box;
 			}
 			*:focus { outline: none; }
+			ul { list-style-type: none; }
 
 			/*scrollbar*/
 			*::-webkit-scrollbar-corner {
@@ -52,15 +55,18 @@
 				height: 100%; font-size: 1px;
 			}
 			body {
-				font-family: 'Roboto', sans-serif; background: #f3f3f3;
+				font-family: 'Roboto', sans-serif; background: #f7f7f7;
 				font-size: 16rem;
 			}
 			a { text-decoration: none; }
 
 			.collection-finderviews { height: 100%; display: flex; flex-direction: row;  }
-
-			context-menu ul { display: block; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.2); }
-			context-menu ul li { background: red; }
+			context-menu div:first-child { overflow: hidden; height: 30rem; font-size: 14rem; color: #EB5424; padding: 9rem 12rem;; }
+			context-menu { position: absolute; top: 75rem; bottom: 40px; left: 20px; right: 20px; bottom: 20px; background: rgba(0,0,0,0.8); }
+			context-menu ul { height: calc(100% - 30rem ); overflow-y: auto; padding: 10rem 0; }
+			context-menu ul li a { display: block; color: #fff; padding: 0 10rem; }
+			context-menu ul li a:hover { background: #555; }
+			context-menu ul li a:focus { background: #999; }
 		</style>
 	</head>
 
@@ -68,37 +74,45 @@
 		<div class="collection-finderviews">
 			<finder-view class="finderview" ng-repeat="finderId in finderInstances" finderview-instance-id="finderId"></finder-view>
 
-			<context-menu>
-				<ul ng-show="menu">
-					<li ng-repeat="node in menu" ng-click="perform(node.action)">{{node.name}}</li>
+			<context-menu ng-show="menu">
+				<div>{{working_directory}}</div>
+				<ul>
+					<li ng-repeat="node in menu"><a href="#" ng-click="perform(node.action)">{{node.title}}</a></li>
 				</ul>
 			</context-menu>
 		</div>
 
 		<script src="node_modules/angular/angular.min.js"></script>
 		<script> "use strict";
-			const node_os = require('os');
-			const node_fs = require('fs');
-			const nw_gui = require('nw.gui');
-			const node_child_process = require('child_process');
+			
 			var cache = {};
 
 			var app = angular.module('app', []);
 
 			app.value('node_path', require('path'));
-
-
+			app.value('nw_gui', require('nw.gui'));
+			app.value('node_fs', require('fs'));
+						
 			////////////////////////////////////////////////////////////////////////////////////
 			//// #FEATURE HANDLER
 			////////////////////////////////////////////////////////////////////////////////////
 
 			app.provider('features', function(){
 				var featurelist = {};
+				//var featurelist = new Map();
 
-				this.registerFeature = function(feature_name, feature){
-					featurelist[feature_name] = {
-						name: feature_name,
-						action: function(){ feature.process.apply(feature, [].slice.call(arguments)) },
+				this.registerFeature = function(feature){
+					// featurelist.push(feature.cmd, {
+					// 	cmd: feature.cmd,
+					// 	action: function(){ feature.instance.process.apply(feature.instance, arguments) },
+					// 	title: feature.title
+					// });
+
+					// return;
+					featurelist[feature.cmd] = {
+						cmd: feature.cmd,
+						action: function(){ feature.instance.process.apply(feature.instance, arguments) },
+						title: feature.title
 					};
 				};
 
@@ -109,6 +123,9 @@
 					};
 
 					Features.prototype.getAllForPath = function(path){
+						// return this.featurelist.filter(function(feature){
+						// 	return feature.canProcess(path);
+						// });
 						return this.featurelist;
 					};
 
@@ -175,14 +192,15 @@
 						 * @return void
 						 */
 						$scope.showMenu = function(path){
-							console.log('show menu')
+							$scope.working_directory = path;
+
 							path_current = path;
 							var menu = features.getAllForPath(path);
 
 							if(menu.length === 0) return;
 
 							$scope.menu = menu;
-							// TODO: set focus and handle tab on your own in order to not focus elements behind the context menu
+							focusFirstAction();
 						}
 
 						$scope.closeMenu = function(){
@@ -193,8 +211,18 @@
 							action(path_current);
 							$scope.closeMenu();
 						}
+
+						function focusFirstAction(){
+							setTimeout(function(){
+								$element[0].querySelector('li:first-child a').focus();
+							});
+						}
 					},
 					link: function(scope){
+						/*
+						 * TODO: toggle class 'active' for item at hand on open/close menu so user still recognizes the item we are presenting the context menu for
+						 */
+						// open contextmenu on [ctrl+enter]
 						document.addEventListener('keydown', function(e){
 							if(e.ctrlKey && e.code === 'Enter'){
 								e.preventDefault();
@@ -207,7 +235,7 @@
 								}
 							}
 						});
-
+						// open contextmenu on right mouse click
 						document.addEventListener('contextmenu', function(e) {
 							if(e.target.classList.contains('finderview__item')) {
 								e.preventDefault();
@@ -217,6 +245,13 @@
 							}
 
 							return false;
+						});
+
+						document.addEventListener('keydown', function(e){
+							if(e.code === 'Escape'){
+								scope.closeMenu();
+								scope.$apply();
+							}
 						});
 					}
 				}
@@ -234,7 +269,7 @@
 				var styles = `
 					<style id="finderViewStyles">
 						.finderview { height: 100%; flex-grow: 1; width: 0; overflow: hidden;}
-						.finderview > ul { height: calc(100% - 65rem - 30rem); overflow-y: auto; hidden; padding: 10rem 0; border-left: 1px dashed #ccc; }
+						.finderview > ul { height: calc(100% - 65rem - 30rem); overflow-y: auto; padding: 10rem 0; border-left: 1px dashed #ccc; }
 						.finderview > ul li { white-space: nowrap; text-overflow: ellipsis; width: 100%; overflow: hidden; }
 						.finderview > ul li a { display: block; padding: 0 0 0 0; }
 						.finderview > ul li:nth-child(even) a {background: #e6e6e6}
@@ -284,7 +319,7 @@
 							},
 					//replace: true,
 					template: template,
-					controller: function($scope, $element, node_path){
+					controller: function($scope, $element, node_path, node_fs, nw_gui){
 
 						var
 							directory = [], // contains a list of fullpaths for the directory recently read
@@ -568,7 +603,6 @@
 								return localStorage.setItem(key, value);
 							}
 						}
-
 					},
 					link: function(scope, element){
 						var $input = element[0].querySelector('[ng-model="querystring"]');
@@ -667,6 +701,10 @@
 			 * Feature: OpenInShell
 			 */
 			(function(featurelist){
+				const node_fs = require('fs');
+				const node_os = require('os');
+				const node_child_process = require('child_process');
+
 				class FeatureOpenInShell extends AbstractFeature {
 					constructor(fullpath){
 						super();
@@ -711,11 +749,11 @@
 						directory = directory.replace(/(["\s'$`\\])/g,'\\$1');
 
 						if (platform === 'win32' || platform === 'win64') { // WIN
-							cmd = "START cmd.exe /k cd "+directory;
+							cmd = "START cmd.exe /k cd " + directory;
 						} else if (platform === 'darwin') { // OSX
-							cmd = "open -a Terminal "+directory;
+							cmd = "open -a Terminal " + directory;
 						} else if (platform === 'linux') { // LINUX
-							cmd = "xterm -e 'cd "+directory+"'";
+							cmd = "xterm -e 'cd " + directory+"'";
 						}
 
 						// invoke cmd
@@ -723,15 +761,17 @@
 					}
 				};
 
-				featurelist.push({cmd: 'shell', instance: new FeatureOpenInShell()});
+				featurelist.push({cmd: 'shell', title: 'Open directory in shell', instance: new FeatureOpenInShell()});
 			}(featurelist));
 			
 			/*
 			 * Feature: OpenInFolder
 			 */
 			(function(featurelist){
+				const nw_gui = require('nw.gui');
+
 				class FeatureOpenInFolder extends AbstractFeature {
-					constructor(fullpath){
+					constructor(){
 						super();
 					}
 					canProcess(fullpath){
@@ -745,24 +785,28 @@
 					}
 				}
 
-				featurelist.push({cmd: 'folder', instance: new FeatureOpenInFolder()});
+				featurelist.push({cmd: 'folder', title: 'Open in parent folder', instance: new FeatureOpenInFolder()});
 			}(featurelist));
 
 			////////////////////////////////////////////////////////////////////////////////////
 			//// #CONFIG
 			////////////////////////////////////////////////////////////////////////////////////
+
 			angular.module('app').config(['featuresProvider', 'inputRouterProvider', function(featuresProvider, inputRouterProvider) {
 
+				/*
+				 * load all features
+				 */
 				for(var i = 0; i < featurelist.length; i++){
 					var feature = featurelist[i];
-					featuresProvider.registerFeature(feature.cmd, feature.instance);
+					featuresProvider.registerFeature(feature);
 				}
 
 				/*
 				 * register all routes
 				 */
 
-				// action routes
+				// action route (invoke a feature by typing in the corresponging command e.g. :shell )
 				inputRouterProvider.register(/^:(.*)$/, function(searchstring, directory, cache, matches, scope, features){
 					var cmd = matches[1];
 
@@ -808,7 +852,6 @@
 					return filtered;
 				});
 			}]);
-			
 		</script>
 	</body>
 </html>
