@@ -9,6 +9,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "angular": "latest"
+    "angular": "latest",
+    "google-spreadsheet-to-json": "^1.0.0",
+    "simple-encryptor": "^1.1.1"
   }
 }
