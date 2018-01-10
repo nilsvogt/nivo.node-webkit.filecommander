@@ -9,7 +9,7 @@
 
 	In Progress:
 	- Context menu
-		- Make context menu an instance of finderview
+		- Make context menu an instance of finderview 
 			- implement datasource and delegate for the finderview in order to make it more reusable
 
 	Done:
@@ -25,8 +25,8 @@
 <html ng-app="app">
 	<head>
 		<title>nivo</title>
-		<link rel="stylesheet" xhref="https://maxcdn.bootstrapcdn.com/font-awesome/4.6.1/css/font-awesome.min.css">
-		<link x-href='https://fonts.googleapis.com/css?family=Roboto' rel='stylesheet' type='text/css'>
+		<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.6.1/css/font-awesome.min.css">
+		<link href='https://fonts.googleapis.com/css?family=Roboto' rel='stylesheet' type='text/css'>
 		<style type="text/css">
 			/* reset */
 			* {
@@ -60,6 +60,7 @@
 			}
 			a { text-decoration: none; }
 
+			.collection-finderviews { height: 100%; display: flex; flex-direction: row;  }
 			context-menu div:first-child { overflow: hidden; height: 30rem; font-size: 14rem; color: #EB5424; padding: 9rem 12rem;; }
 			context-menu { position: absolute; top: 75rem; bottom: 40px; left: 20px; right: 20px; bottom: 20px; background: rgba(0,0,0,0.8); }
 			context-menu ul { height: calc(100% - 30rem ); overflow-y: auto; padding: 10rem 0; }
@@ -70,56 +71,28 @@
 	</head>
 
 	<body ng-controller="AppCtrl">
+		<div class="collection-finderviews">
+			<finder-view class="finderview" ng-repeat="finderId in finderInstances" finderview-instance-id="finderId"></finder-view>
 
-		<main-view>
-		</main-view>
+			<context-menu ng-show="menu">
+				<div>{{working_directory}}</div>
+				<ul>
+					<li ng-repeat="node in menu"><a href="#" ng-click="perform(node.action)">{{node.title}}</a></li>
+				</ul>
+			</context-menu>
+		</div>
 
-		<scr_ipt src="angular.1.6.1.js"></script>
+		<script src="node_modules/angular/angular.min.js"></script>
 		<script> "use strict";
+			
+			var cache = {};
 
-			var angular = require('angular');
 			var app = angular.module('app', []);
 
 			app.value('node_path', require('path'));
 			app.value('nw_gui', require('nw.gui'));
-			
-			app.value('fs', require('fs'));
-
-			app.provider('credentials', [function() {
-
-				this.path = null;
-
-				/**
-				 * Load the credentials file
-				 */
-				var Credentials = function(path, filesystem) {
-					// the path to the credentials file
-					this.path = path;
-
-					this.filesystem = filesystem;
-				}
-
-				Credentials.prototype.load = function() {
-					var path = this.path;
-
-					if (!this.filesystem.existsSync(path)) {
-						throw 'File "' + path + '" containing the credentials was not found';
-					}
-					
-					return this.filesystem.readFileSync(path, 'utf8');
-				}
-
-				this.$get = function(fs){
-					return new Credentials(this.path, fs).load();
-				}
-			}])
-
-            // Load native UI library
-			var gui = require('nw.gui'); //or global.window.nwDispatcher.requireNwGui() (see https://github.com/rogerwang/node-webkit/issues/707)
-
-			// Get the current window
-			var win = gui.Window.get();
-
+			app.value('node_fs', require('fs'));
+						
 			////////////////////////////////////////////////////////////////////////////////////
 			//// #FEATURE HANDLER
 			////////////////////////////////////////////////////////////////////////////////////
@@ -206,56 +179,6 @@
 			});
 
 			////////////////////////////////////////////////////////////////////////////////////
-			//// #DATASOURCE
-			////////////////////////////////////////////////////////////////////////////////////
-
-			app.provider('dataSource', function() {	
-				var DataSource = function(credentials){
-					this.useMock = true;
-					this.credentials = credentials;
-					this.gsjson = require('google-spreadsheet-to-json');
-				};
-
-				DataSource.prototype.retreive = function() {
-					if (this.useMock) {
-						return this.getDummyData();
-					} else {
-						return this.getData()
-					}
-				};
-
-				DataSource.prototype.getDummyData = function() {
-					var worksheetA = [
-						{"title":"golem","tags":"it news","content":"http://golem.de"},
-						{"title":"heise","tags":"it news","content":"http://heise.de"}
-					];
-
-					var worksheetB = [
-						{"title":"golem","tags":"it news","content":"http://golem.de"},
-						{"title":"heise","tags":"it news","content":"http://heise.de"}
-					];
-
-					var worksheets = [worksheetA, worksheetB];
-
-					return new Promise(function(resolve, reject) {
-						resolve(worksheets);
-					});
-				};
-
-				DataSource.prototype.getData = function() {
-					return this.gsjson({
-						spreadsheetId: '1FHs5ZsplYJBozmxYNaD7dVt8iyJQV7SGhoRP94tvKHo',
-						credentials: this.credentials,
-						allWorksheets: true
-					})
-				};
-
-				this.$get = ['credentials', function(credentials) {
-					return new DataSource(credentials);
-				}];
-			});
-
-			////////////////////////////////////////////////////////////////////////////////////
 			//// #CONTEXT MENU
 			////////////////////////////////////////////////////////////////////////////////////
 
@@ -335,72 +258,10 @@
 			});
 
 			////////////////////////////////////////////////////////////////////////////////////
-			//// #MAIN VIEW
-			////////////////////////////////////////////////////////////////////////////////////
-
-			app.component('mainView', {
-				template: `
-					<main style="height: 100%; display: flex; flex-direction: row;">   
-						<finder-view 
-							class="finderview" 
-							finderview-instance-id="finderId" 
-							foobar="$ctrl.foo" 
-							on-entry-select="$ctrl.setEntry(entry)">
-						</finder-view>
-
-						<detail-view entry="$ctrl.selectedEntry"></detail-view>
-					</main>
-				`,
-				//template: '<main ng-transclude>    </main>',
-				
-				//transclude: true,
-				//replace: true,
-				
-				controller: function(){
-					var vm = this;
-
-					vm.selectedEntry = null;
-
-					vm.setEntry = function setEntry(entry) {
-						vm.selectedEntry = entry;
-					}
-				}
-			})
-
-			////////////////////////////////////////////////////////////////////////////////////
-			//// #DETAIL VIEW
-			////////////////////////////////////////////////////////////////////////////////////
-
-			app.component('detailView', {
-				template: '<div class="detailView">selectedEntry: {{$ctrl.entry}} {{$ctrl.entry.title}} </div>',
-				bindings: {
-					entry: '<'
-				},
-				controller: function(){
-					var vm = this,
-						styles = `
-							detail-view { flex-grow: 1; width: 0; }
-							.detailView { background: #ccc; height: 100%; }
-						`;
-
-					vm.$onInit = function(){
-						initStyles();
-						console.log('INIT DETAIL VIEW', this)
-					}
-
-					function initStyles() {
-						var styleElement = document.createElement('style');
-						styleElement.innerHTML = styles;
-						document.head.appendChild(styleElement);
-					}
-				}
-			});
-
-			////////////////////////////////////////////////////////////////////////////////////
 			//// #FINDER VIEW
 			////////////////////////////////////////////////////////////////////////////////////
 
-			app.directive('finderView', ['inputRouter', 'dataSource', (inputRouter, dataSource)=>{
+			app.directive('finderView', ['inputRouter', (inputRouter)=>{
 
 				/**
 				 * Those styles get appended to the head only once
@@ -439,63 +300,131 @@
 							</form>
 						</div>
 						<ul>
+							<li><a href="#" ng-click="openParentDir()">..</a></li>
 							<li ng-repeat="(i, node) in viewResultList">
-								<a href="#" data-i="{{i}}" ng-click="onSelectRow(node)" title="{{node}}" class="finderview__item">
-									<i class="fa fa-folder-o"></i>
-									{{node.title}} | {{node.tags}}
+								<a href="#" data-i="{{i}}" ng-click="open(node)" title="{{node}}" class="finderview__item" ng-class="{'finderview__item--isFile' : cache[node].isFile(), 'finderview__item--isDirectory' : cache[node].isDirectory(), 'finderview__item--isSymbolicLink' :cache[node].isSymbolicLink()}">
+									<i class="fa fa-folder-o" ng-If="cache[node].isDirectory()"></i>
+									{{basename(node)}}
+									<span ng-If="node !== cache[node].custom_realPath" style="font-size: 0.7em; ">({{cache[node].custom_realPath}})</span>
 								</a>
 							</li>
 						</ul>
 						<div style="color: #555; font-size: 12rem; box-shadow: 0 0 3px rgba(0, 0, 0, 0.2); padding: 9rem">
 							Matches: {{viewResultList.length}}
-						</div>
-					`;
+						</div>`;
 
 				return {
 					scope:{
-						finderviewInstanceId: "=", // unique id for the localStorage,
-						onEntrySelect: "&",
-						foobar: "="
-					},
+								finderviewInstanceId: "=" // unique id for the localStorage
+							},
+					//replace: true,
 					template: template,
-					controller: function($scope, $element, node_path, nw_gui, dataSource){
-
-						var data = undefined;
-						var selectedIndex = 0;
-
-						dataSource.retreive().then(function(fetchedData)
-						{
-							// merge list of arrays into one array
-							// Array.prototype.concat.apply([], [[1], [2], [3]])
-							data = Array.prototype.concat.apply([], fetchedData);
-							
-							$scope.viewResultList = data;
-							$scope.$apply();
-						});
-
-						$scope.onSelectRow = function(entry){
-							$scope.onEntrySelect({entry: entry});
-						};
+					controller: function($scope, $element, node_path, node_fs, nw_gui){
 
 						var
 							directory = [], // contains a list of fullpaths for the directory recently read
 							$input = $element[0].querySelector('[ng-model="querystring"]'); // userinput-field for the querystring we utilize to filter the output
 
+						$scope.cache = cache; // containing all nodeInfos of the collected paths
 						$scope.viewResultList = []; // the list of results presented in the view
+						$scope.directory_path = null; // the current directory path of the directory at hand
+
+						//document.addEventListener('app/path_change', function(e){
+
+						/*
+						 * @deprecated
+						 */
+						document.addEventListener('app/path_change', function(e){
+							var path = e.detail.path;
+
+							try {
+								node_fs.accessSync(path, node_fs.F_OK); //get to know whether a directory exists or not
+								$scope.open(path)
+							} catch (e) {
+								console.error(path + ' does not exist', e)
+							}
+						});
+
+						// initially present recent directory OR rootdir
+						_readDir(_storage('directory_path') || node_path.resolve(node_path.sep), (path)=>{
+							document.title = path;
+							_updateResult(directory);
+							$scope.resetQueryString();
+						});
+
+						$scope.onQuerystringChange = function(new_value, old_value){
+							if(new_value === old_value) return;
+
+							var resultList = inputRouter.handle(new_value, directory, $scope.cache, $scope);
+							if(resultList !== null){
+								$scope.viewResultList = resultList;
+							}
+						}
+
+						/**
+						 * Obtain fylesystem info for a node passed a fullpath for
+						 * @param string fullpath The fullpath of the node we want acquire info from
+						 * @return false|object Return false if file is not accessable or an object containing status info
+						 */
+						function _getNodeFromFilesystem(fullpath){
+							var nodeInfo;
+							try{
+								nodeInfo = node_fs.lstatSync(fullpath); // some files are not accessible since they are provided by the underlaying OS
+							}catch($err){
+								return false;
+							}
+
+							var realPath = node_path.normalize(node_fs.realpathSync(fullpath));
+
+							nodeInfo.custom_realPath = realPath;
+							nodeInfo.custom_path = fullpath;
+
+							if(realPath != fullpath){
+								return _getNodeFromFilesystem(realPath);
+							}
+							return nodeInfo;
+						}
+
+						/**
+						 * Return the last portion of a path. Similar to the Unix basename command.
+						 */
+						$scope.basename = function(path){
+							return node_path.basename(path);
+						}
+
+						/**
+						 * The passed nodename prepended by the corresponding (current) directory path
+						 */
+						function _fullpath(node){
+							return node_path.join($scope.directory_path, node);
+						}
 
 						////////////////////////////////////////////////////////////////////////////////////
 						//// #VIEWS RESULT-LIST
 						////////////////////////////////////////////////////////////////////////////////////
 
-						$scope.onQuerystringChange = function(new_value, old_value)
-						{
-							if(new_value === old_value) return;
+						function _updateResult(resultList){
+							$scope.viewResultList = _sortResultList(resultList);
+							$scope.$apply();
+						}
 
-							var resultList = inputRouter.handle(new_value, data);
+						/**
+						 * Sort by name and type (dir|file)
+						 */
+						function _sortResultList(resultList){
+							resultList = resultList.sort(function(a, b){
+								var
+									a_sort = (cache[a].isDirectory() ? 'DIR' : 'FILE') + a,
+									b_sort = (cache[b].isDirectory() ? 'DIR' : 'FILE') + b,
+									comparison = a_sort.toLowerCase().localeCompare(b_sort.toLowerCase());
+								if(comparison === 0){
+									comparison = a_sort.localeCompare(b_sort);
+								}
+								return comparison;
 
-							if(resultList !== null){
-								$scope.viewResultList = resultList;
-							}
+							});
+
+							return resultList;
 						}
 
 						////////////////////////////////////////////////////////////////////////////////////
@@ -503,17 +432,21 @@
 						////////////////////////////////////////////////////////////////////////////////////
 
 						/**
-						 * Called once the user is about to type anything
+						 * Clears the Searchstring
 						 */
-						$scope.focusInput = function()
-						{
+						$scope.resetQueryString = function(){
+							$scope.querystring = "";
+						}
+
+						/**
+						 *
+						 */
+						$scope.focusInput = function(){
 							 $input.focus();
 						}
 
-						$scope.onFocusInput = function()
-						{
-							// once the user focuses the search field none listItem is selected anymore
-							selectedIndex = undefined;
+						$scope.onFocusInput = function(){
+							document.title = $scope.directory_path;
 						}
 
 						////////////////////////////////////////////////////////////////////////////////////
@@ -521,76 +454,155 @@
 						////////////////////////////////////////////////////////////////////////////////////
 
 						/**
-						 * TODO: abstract the way a node is focused and use index derectly here 
-						 *       to retreive the focused element
+						 *
 						 */
-						$scope.selectFocusedNode = function()
-						{
-							if (selectedIndex === undefined) {
-								return;
+						$scope.open = function( path ){
+							var node_info = _cacheGet(path) || _getNodeFromFilesystem(path); // when path is not found in cache the requested path is most likely another harddrive
+
+							if(node_info.isDirectory()){
+								_readDir(node_info.custom_path, (path)=>{
+									document.title = path;
+									_updateResult(directory);
+									$scope.resetQueryString();
+									$scope.$apply();
+								});
+							}else if(node_info.isFile()){
+								nw_gui.Shell.openItem(path);
 							}
 
-							var focusedEntry = $scope.viewResultList[selectedIndex];
-
-							selectEntry(focusedEntry);
+							$scope.focusInput();
 						}
 
-						/**
-						 * select first item in resultlist when search was submitted
-						 */
-						$scope.submitSearch = function()
-						{
+						$scope.openFocusedNode = function(){
+							var
+								nodes = [].slice.call($element[0].querySelector('ul').children),
+								focusedNode = document.activeElement.parentElement,
+								index = nodes.indexOf(focusedNode);
+
+							// make sure focused element is an item in the list. Otherwise stop processing here.
+							if(index === -1) return;
+
+							$scope.open(document.activeElement.title);
+						}
+
+						$scope.submitSearch = function(){
 							if(!$scope.viewResultList.length) return;
+							$scope.open($scope.viewResultList[0]);
+						}
 
-							var firstEntry = $scope.viewResultList[0];
+						$scope.focusNextNode = function(){
+							var
+								nodes = [].slice.call($element[0].querySelector('ul').children),
+								focusedNode = document.activeElement.parentElement,
+								index = nodes.indexOf(focusedNode),
+								nextNode = $element[0].querySelector('ul li:first-child a'); // default next item is the first item
 
-							selectEntry(firstEntry);
+							if(index > -1){ // if focusedNode was found in nodecollection we can grab the next sibling otherwise we just focus the first element
+								nextNode = $element[0].querySelector('ul li:nth-child('+ (((index+1)%nodes.length)+1) +') a');
+							}
+
+							nextNode.focus();
+						}
+
+
+						$scope.focusPreviousNode = function(){
+							var
+								nodes = [].slice.call($element[0].querySelector('ul').children),
+								focuesdNode = $element[0].querySelector('ul li a:focus').parentElement,
+								index = nodes.indexOf(focuesdNode),
+								index_next = (((index-1)%nodes.length)+nodes.length)%nodes.length, // negative modulo: ((number%n)+n)%n;
+								nextNode = $element[0].querySelector('ul li:nth-child('+ (index_next+1) +') a');
+							nextNode.focus();
 						}
 
 						/**
-						 * 
+						 * Open parent directory of current directory
 						 */
-						function selectEntry(entry) 
-						{
-							document.title = entry.title;
+						$scope.openParentDir = function(){
+							var isRootDir = $scope.directory_path === node_path.sep;
+							if(isRootDir) return;
 
-							$scope.onEntrySelect({entry: firstEntry});
+							var path = node_path.resolve($scope.directory_path, '../');
+							_readDir(path, (path)=>{
+								document.title = path;
+								_updateResult(directory);
+								$scope.resetQueryString();
+							});
+
+							$scope.focusInput();
 						}
 
+						/**
+						 * Read passed directory and updates views resultList
+						 * @param string path The path of the directory to be read
+						 * @return void
+						 */
+						function _readDir(path, callback){
+							callback = callback || function(){};
+
+							$scope.directory_path = path;
+
+							node_fs.readdir($scope.directory_path, (err, data) => {
+								if (err){
+									console.error(path, err);
+									return;
+								};
+
+								_storage('directory_path', path); // remember last directorypath to get there on restart
+
+								// create list of all nodes in the directory
+								directory = [];
+								data.forEach((basename) => {
+									directory.push(_fullpath(basename));
+								});
+
+								// filter directory and update cache
+								directory = directory.filter((fullpath) => {
+									var nodeInfo = _getNodeFromFilesystem(fullpath);
+									if(nodeInfo === false){
+										return false;
+									}
+
+									_cacheSet(fullpath, nodeInfo);
+
+									return true;
+								});
+
+								callback(path);
+							});
+						}
 
 						////////////////////////////////////////////////////////////////////////////////////
-						//// #CONTROLS
+						//// CACHE
 						////////////////////////////////////////////////////////////////////////////////////
 
-						$scope.focusNextNode = function()
-						{
-							var listItems = [].slice.call($element[0].querySelector('ul').children),
-								nextListItem = null;
-
-							selectedIndex = ++selectedIndex % listItems.length || 0;
-							console.log(selectedIndex)
-							
-							nextListItem = listItems[selectedIndex];
-
-							nextListItem.querySelector('a').focus();
+						function _cacheSet(fullpath, nodeInfo){
+							cache[fullpath] = nodeInfo;
 						}
 
-
-						$scope.focusPreviousNode = function()
-						{
-							var listItems = [].slice.call($element[0].querySelector('ul').children),
-								prevListItem = null,
-								length = listItems.length;
-
-							selectedIndex = selectedIndex || 0; // make sure it is not undefined
-
-							selectedIndex = ((--selectedIndex%length)+length)%length;
-							
-							prevListItem = listItems[selectedIndex];
-
-							prevListItem.querySelector('a').focus();
+						function _cacheGet(path){
+							return cache[path];
 						}
 
+						////////////////////////////////////////////////////////////////////////////////////
+						//// STORAGE
+						////////////////////////////////////////////////////////////////////////////////////
+
+						/**
+						 * Get/Set a value in the storage by the respected namespace ('finderView-n')
+						 * @return mixed
+						 */
+						function _storage(){
+							var
+								key = 'finderView-' + $scope.finderviewInstanceId +'_'+ arguments[0],
+								value = arguments[1];
+
+							if(value === undefined){
+								return localStorage.getItem(key);
+							}else {
+								return localStorage.setItem(key, value);
+							}
+						}
 					},
 					link: function(scope, element){
 						var $input = element[0].querySelector('[ng-model="querystring"]');
@@ -600,23 +612,23 @@
 
 						// handle [UP] and [DOWN] keys
 						element[0].addEventListener('keydown', function(e){
-							if (e.keyCode === 16) return; // shiftleft + shiftright
-							if (e.code === 'Tab') return; // Tab is used natively
-							if (e.code === 'Enter') return; // prevent form from being submitted (To be honest, I dont relly know why the form should get submitted but it does so when we do not return here..)
+							if(e.keyCode === 16) return; // shiftleft + shiftright
+							if(e.code === 'Tab') return; // Tab is used natively
+							if(e.code === 'Enter') return; // prevent form from being submitted (To be honest, I dont relly know why the form should get submitted but it does so when we do not return here..)
 
-							if (e.keyCode === 38) { // up
+							if(e.keyCode === 38){ // up
 								e.preventDefault(); // prevent from triggering scrolling the scrollbar
 								scope.focusPreviousNode();
-							} else if(e.keyCode === 40) { // down
+							}else if(e.keyCode === 40){ // down
 								e.preventDefault(); // prevent from triggering scrolling the scrollbar
 								scope.focusNextNode();
-							} else if(e.keyCode === 39) { // right
-								scope.selectFocusedNode();
-							} else if(e.which !== 0 && !e.ctrlKey && !e.metaKey && !e.altKey) { // handle all printable characters
+							}else if(e.keyCode === 39){ // right
+								scope.openFocusedNode();
+							}else if(e.keyCode === 37){ // right
+								scope.openParentDir();
+							}else if(e.which !== 0 && !e.ctrlKey && !e.metaKey && !e.altKey){ // handle all printable characters
 								scope.focusInput();
 							}
-
-							scope.$apply();
 						});
 
 						scope.$watch('querystring', scope.onQuerystringChange);
@@ -628,22 +640,39 @@
 					}
 				};
 			}]);
-			
 
 			////////////////////////////////////////////////////////////////////////////////////
 			//// #APP
 			////////////////////////////////////////////////////////////////////////////////////
 
 			app.controller('AppCtrl', function ($scope, $element) {
-				
+
 				// handle ctrl+1, ctrl+2, ctrl+3, ctrl+4 to update amount of finderViewInsatnces
-				var gridKeys = [1, 2, 3, 4];
+				var gridKeys = [1,2,3,4];
 				$element[0].addEventListener('keydown', function(e){
 					if(e.ctrlKey && gridKeys.indexOf(parseInt(String.fromCharCode(e.keyCode))) !== -1){
-						// on shortcut
+						var numberInstances = parseInt(String.fromCharCode(e.keyCode), 10);
+						showNumberFinderViews(numberInstances);
 						$scope.$apply();
 					}
 				});
+
+				/**
+				 * Update $scope.finderInstances so view shows up desired amount of finderInstances
+				 */
+				function showNumberFinderViews (numberInstances){
+					var range = [];
+					for(var i = 1; i <= numberInstances; i++){
+						range.push(i);
+					}
+					$scope.finderInstances = range;
+
+					// remmeber that setting
+					localStorage.setItem('AppCtrl_numberFinderInstances', numberInstances);
+				}
+
+				// show last amount of finderInstances
+				showNumberFinderViews(localStorage.getItem('AppCtrl_numberFinderInstances') || 1);
 			});
 
 			////////////////////////////////////////////////////////////////////////////////////
@@ -665,7 +694,7 @@
 					}
 				}
 			}
-
+			
 			var featurelist = [];
 
 			/*
@@ -734,7 +763,7 @@
 
 				featurelist.push({cmd: 'shell', title: 'Open directory in shell', instance: new FeatureOpenInShell()});
 			}(featurelist));
-
+			
 			/*
 			 * Feature: OpenInFolder
 			 */
@@ -760,13 +789,10 @@
 			}(featurelist));
 
 			////////////////////////////////////////////////////////////////////////////////////
-			//// #CONFIG & BOOTSTRAP
+			//// #CONFIG
 			////////////////////////////////////////////////////////////////////////////////////
 
-			angular.module('app').config(['featuresProvider', 'inputRouterProvider', 'dataSourceProvider', 'credentialsProvider', function(featuresProvider, inputRouterProvider, dataSourceProvider, credentialsProvider) {
-
-				// assign the path to the creds.json file
-				credentialsProvider.path = 'creds.json';
+			angular.module('app').config(['featuresProvider', 'inputRouterProvider', function(featuresProvider, inputRouterProvider) {
 
 				/*
 				 * load all features
@@ -780,7 +806,6 @@
 				 * register all routes
 				 */
 
-				/*
 				// action route (invoke a feature by typing in the corresponging command e.g. :shell )
 				inputRouterProvider.register(/^:(.*)$/, function(searchstring, directory, cache, matches, scope, features){
 					var cmd = matches[1];
@@ -812,32 +837,21 @@
 
 					return filtered;
 				});
-					*/
+
 				// Simple list filter that reduces the shown resultlist to items matching the searchstring entered by the user
-				inputRouterProvider.register(/^.*$/, function(searchstring, haystack, cache, matches){
+				inputRouterProvider.register(/^.*$/, function(searchstring, directory, cache, matches){
 					var filtered = [];
 
-					for (var i = 0; i < haystack.length; i++) {
-						var item = haystack[i];
-
-
-						if (new RegExp('^.*'+searchstring+'[^\\\\]*$', 'i').test(item.title)) {
-							filtered.push(item);
-						} else if (new RegExp('^.*'+searchstring+'[^\\\\]*$', 'i').test(item.tags)) {
+					for (var i = 0; i < directory.length; i++) {
+						var item = directory[i];
+						if (new RegExp('^.*'+searchstring+'[^\\\\]*$', 'i').test(item)) {
 							filtered.push(item);
 						}
 					}
 
 					return filtered;
 				});
-
-				// configure datasource
-				// .. pass in flag indicating dev-mode
 			}]);
-
-			angular.element(function() {
-				angular.bootstrap(document, ['app']);
-			});
 		</script>
 	</body>
 </html>
